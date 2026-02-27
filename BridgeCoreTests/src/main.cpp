@@ -52,9 +52,12 @@ static int g_skipped = 0;
 // Test: Config parsing via environment variables
 // ---------------------------------------------------------------------------
 static void TestConfigEnvOverride() {
-    SetEnvironmentVariableA("BRIDGE_ADAPTER_TYPE", "DOTNET");
-    SetEnvironmentVariableA("BRIDGE_T4_HOST",      "test.host");
-    SetEnvironmentVariableA("BRIDGE_T4_PORT",      "1234");
+    // Use _putenv_s (CRT) so the values are visible to _dupenv_s (also CRT)
+    // in Config::ApplyEnvOverrides.  SetEnvironmentVariableA (Win32) writes to
+    // a separate env block that _dupenv_s does NOT read on MSVC.
+    _putenv_s("BRIDGE_ADAPTER_TYPE", "DOTNET");
+    _putenv_s("BRIDGE_T4_HOST",      "test.host");
+    _putenv_s("BRIDGE_T4_PORT",      "1234");
 
     BridgeConfig cfg;
     cfg.ApplyEnvOverrides();
@@ -63,10 +66,10 @@ static void TestConfigEnvOverride() {
     ASSERT_EQ(cfg.t4Host,      std::string("test.host"));
     ASSERT_EQ(cfg.t4Port,      1234);
 
-    // Clean up
-    SetEnvironmentVariableA("BRIDGE_ADAPTER_TYPE", nullptr);
-    SetEnvironmentVariableA("BRIDGE_T4_HOST",      nullptr);
-    SetEnvironmentVariableA("BRIDGE_T4_PORT",      nullptr);
+    // Clean up – remove from CRT env block
+    _putenv_s("BRIDGE_ADAPTER_TYPE", "");
+    _putenv_s("BRIDGE_T4_HOST",      "");
+    _putenv_s("BRIDGE_T4_PORT",      "");
 }
 
 // ---------------------------------------------------------------------------
