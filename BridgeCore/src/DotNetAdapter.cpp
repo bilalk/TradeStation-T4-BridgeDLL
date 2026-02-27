@@ -151,7 +151,7 @@ private:
             HMODULE hMod = nullptr;
             GetModuleHandleExA(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCSTR>(DotNetAdapterModuleMarker), &hMod);
+                reinterpret_cast<LPCSTR>(&DotNetAdapterModuleMarker), &hMod);
             if (hMod) GetModuleFileNameA(hMod, dllPath, MAX_PATH);
             std::string dir(dllPath);
             auto sep = dir.rfind('\\');
