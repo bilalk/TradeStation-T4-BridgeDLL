@@ -1,72 +1,62 @@
 #include "Logger.h"
-#include <fstream>
-#include <iostream>
-#include <mutex>
-#include <string>
-#include <chrono>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <ctime>
-#include <filesystem>
+#include <cstdio>
 
-namespace Bridge {
+namespace Logger {
+    static HANDLE       g_hFile = INVALID_HANDLE_VALUE;
+    static CRITICAL_SECTION g_cs;
+    static bool         g_csInit = false;
 
-static std::mutex    g_logMutex;
-static std::ofstream g_logFile;
-static bool          g_logToConsole = false;
-
-static std::string CurrentTimestamp() noexcept {
-    try {
-        auto now  = std::chrono::system_clock::now();
-        std::time_t t = std::chrono::system_clock::to_time_t(now);
-        char buf[32] = {};
-#ifdef _WIN32
-        struct tm tm_info;
-        localtime_s(&tm_info, &t);
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_info);
-#else
-        struct tm* tm_info = std::localtime(&t);
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_info);
-#endif
-        return buf;
-    }
-    catch (...) { return "0000-00-00 00:00:00"; }
-}
-
-static const char* LevelStr(LogLevel level) noexcept {
-    switch (level) {
-        case LogLevel::DEBUG_:   return "DEBUG";
-        case LogLevel::INFO:     return "INFO ";
-        case LogLevel::WARNING_: return "WARN ";
-        case LogLevel::ERROR_:   return "ERROR";
-        default:                 return "?????";
-    }
-}
-
-void LogInit(const std::string& filePath, bool logToConsole) noexcept {
-    try {
-        std::lock_guard<std::mutex> lk(g_logMutex);
-        g_logToConsole = logToConsole;
-        if (!filePath.empty()) {
-            // Create parent directories if needed
-            std::filesystem::path p(filePath);
-            if (p.has_parent_path())
-                std::filesystem::create_directories(p.parent_path());
-            g_logFile.open(filePath, std::ios::app);
+    void Init(const std::string& logPath) {
+        if (!g_csInit) {
+            InitializeCriticalSection(&g_cs);
+            g_csInit = true;
+        }
+        if (g_hFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(g_hFile);
+        }
+        g_hFile = CreateFileA(
+            logPath.c_str(),
+            GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (g_hFile != INVALID_HANDLE_VALUE) {
+            SetFilePointer(g_hFile, 0, nullptr, FILE_END);
         }
     }
-    catch (...) {}
-}
 
-void Log(LogLevel level, const std::string& message) noexcept {
-    try {
-        std::string line = "[" + CurrentTimestamp() + "] [" +
-                           LevelStr(level) + "] " + message + "\n";
-        std::lock_guard<std::mutex> lk(g_logMutex);
-        if (g_logFile.is_open())
-            g_logFile << line << std::flush;
-        if (g_logToConsole)
-            std::cout << line << std::flush;
+    void Log(const std::string& msg) {
+        // Always write to OutputDebugString for easy debugging.
+        OutputDebugStringA(("[BridgeDLL] " + msg + "\n").c_str());
+
+        if (!g_csInit) return;
+        EnterCriticalSection(&g_cs);
+
+        time_t t = time(nullptr);
+        char ts[32];
+        struct tm tmBuf{};
+        gmtime_s(&tmBuf, &t);
+        strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tmBuf);
+
+        std::string line = std::string(ts) + " " + msg + "\r\n";
+
+        if (g_hFile != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(g_hFile, line.c_str(), static_cast<DWORD>(line.size()), &written, nullptr);
+            FlushFileBuffers(g_hFile);
+        }
+        LeaveCriticalSection(&g_cs);
     }
-    catch (...) {}
-}
 
-} // namespace Bridge
+    void Shutdown() {
+        if (g_hFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(g_hFile);
+            g_hFile = INVALID_HANDLE_VALUE;
+        }
+        if (g_csInit) {
+            DeleteCriticalSection(&g_cs);
+            g_csInit = false;
+        }
+    }
+}
