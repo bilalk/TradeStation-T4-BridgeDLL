@@ -1,42 +1,32 @@
-# CodeQL analysis artifacts
-_codeql_detected_source_root
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
 
-# Build output directories
+# VS build outputs
 x64/
 Debug/
 Release/
-Win32/
-ipch/
-.vs/
-
-# Object files and intermediate build files
-*.obj
-*.pch
-*.idb
-*.pdb
-*.ilk
-*.exp
 *.suo
 *.user
-*.ncb
-*.sdf
-*.opensdf
 *.VC.db
-*.VC.opendb
+*.VC.VC.opendb
+*.sdf
+*.ipch
+*.ncb
+*.opensdf
+.vs/
 
-# Log files (keep directory, ignore content)
-logs/*.log
+# .NET build outputs
+dotnet/**/bin/
+dotnet/**/obj/
 
-# Config with secrets (commit only the example)
+# Config with real credentials – NEVER commit this file
 config/bridge.json
 
-# CMake (if ever used)
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
+# Log files
+*.log
 
-# Temp/swap
-*.tmp
-*.bak
-*~
+# OS files
+.DS_Store
+Thumbs.db
+_codeql_detected_source_root
