@@ -51,7 +51,7 @@ bool BridgeConfig::LoadFromFile(const std::string& path) {
     s = get("dotnetWorkerPath");      if (!s.empty()) dotnetWorkerPath  = s;
     s = get("pipeName");              if (!s.empty()) pipeName          = s;
     s = get("t4Host");                if (!s.empty()) t4Host            = s;
-    s = get("t4Port");                if (!s.empty()) t4Port            = std::stoi(s);
+    s = get("t4Port");                if (!s.empty()) { try { t4Port = std::stoi(s); } catch (...) { Logger::Log("Config: invalid t4Port value: " + s); } }
     s = get("t4User");                if (!s.empty()) t4User            = s;
     s = get("t4Password");            if (!s.empty()) t4Password        = s;
     s = get("t4License");             if (!s.empty()) t4License         = s;
@@ -77,7 +77,7 @@ void BridgeConfig::ApplyEnvOverrides() {
     s = env("BRIDGE_DOTNET_WORKER_PATH");     if (!s.empty()) dotnetWorkerPath  = s;
     s = env("BRIDGE_PIPE_NAME");              if (!s.empty()) pipeName          = s;
     s = env("BRIDGE_T4_HOST");               if (!s.empty()) t4Host            = s;
-    s = env("BRIDGE_T4_PORT");               if (!s.empty()) t4Port            = std::stoi(s);
+    s = env("BRIDGE_T4_PORT");               if (!s.empty()) { try { t4Port = std::stoi(s); } catch (...) { Logger::Log("Config: invalid BRIDGE_T4_PORT value: " + s); } }
     s = env("BRIDGE_T4_USER");               if (!s.empty()) t4User            = s;
     s = env("BRIDGE_T4_PASSWORD");           if (!s.empty()) t4Password        = s;
     s = env("BRIDGE_T4_LICENSE");            if (!s.empty()) t4License         = s;
