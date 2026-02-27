@@ -1,0 +1,5 @@
+EXPORTS
+    PLACE_ORDER_A       @1
+    PLACE_ORDER_W       @2
+    PLACE_ORDER_CMD_A   @3
+    PLACE_ORDER_CMD_W   @4
