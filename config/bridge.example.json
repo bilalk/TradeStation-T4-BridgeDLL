@@ -12,5 +12,14 @@
   "_comment_dotnet": {
     "dotnetAssemblyPath": "path/to/T4Adapter.dll",
     "dotnetClassName": "T4.BrokerAdapter"
-  }
+  },
+
+  "_comment_dotnet_worker": "Settings for the optional BridgeDotNetWorker process (see docs/Build_and_Run.md)",
+  "connector": "STUB",
+  "_comment_connector": "STUB (default, no credentials needed) | REAL (requires T4.Api NuGet + /p:T4SDK=true)",
+  "t4Host": "uhfix-sim.t4login.com",
+  "t4Port": 10443,
+  "t4Username": "YOUR_SIMULATOR_USERNAME",
+  "_comment_secrets": "Never store t4Password or t4LicenseKey here – use T4_PASSWORD and T4_LICENSE_KEY env vars instead",
+  "pipeName": "BridgeT4Pipe"
 }

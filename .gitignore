@@ -9,6 +9,10 @@ Win32/
 ipch/
 .vs/
 
+# .NET build artifacts
+dotnet/**/bin/
+dotnet/**/obj/
+
 # Object files and intermediate build files
 *.obj
 *.pch
