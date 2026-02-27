@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BridgeDotNetWorker</AssemblyName>
+    <RootNamespace>BridgeDotNetWorker</RootNamespace>
+    <!-- When T4SDK=true, define REAL_T4_SDK so RealT4Connector compiles with SDK bindings.
+         Set this only locally after installing T4.Api NuGet (see docs/Build_and_Run.md). -->
+    <DefineConstants Condition="'$(T4SDK)' == 'true'">$(DefineConstants);REAL_T4_SDK</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Conditionally reference T4.Api only when T4SDK=true.
+       CI never sets T4SDK, so no network fetch is required in CI. -->
+  <ItemGroup Condition="'$(T4SDK)' == 'true'">
+    <PackageReference Include="T4.Api" Version="*" />
+  </ItemGroup>
+
+</Project>
