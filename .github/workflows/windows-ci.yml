@@ -43,8 +43,21 @@ jobs:
             Write-Host "No logs directory found."
           }
 
+      - name: Check T4 secrets availability
+        id: t4_secrets
+        shell: pwsh
+        run: |
+          if ("${{ secrets.BRIDGE_T4_USER }}" -ne "") {
+            Write-Host "T4 credentials are configured – smoke test will validate the connection."
+            echo "available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "T4 credentials are NOT configured – skipping real T4 smoke test."
+            Write-Host "To enable, add these repository secrets: BRIDGE_T4_USER, BRIDGE_T4_PASSWORD, BRIDGE_T4_HOST, BRIDGE_T4_PORT, BRIDGE_T4_LICENSE, BRIDGE_CONNECTOR"
+            echo "available=false" >> $env:GITHUB_OUTPUT
+          }
+
       - name: T4 Smoke Test (real connector)
-        if: ${{ secrets.BRIDGE_T4_USER != '' }}
+        if: steps.t4_secrets.outputs.available == 'true'
         shell: pwsh
         env:
           BRIDGE_CONNECTOR: ${{ secrets.BRIDGE_CONNECTOR }}
@@ -54,7 +67,7 @@ jobs:
           T4_PASSWORD: ${{ secrets.BRIDGE_T4_PASSWORD }}
           T4_LICENSE_KEY: ${{ secrets.BRIDGE_T4_LICENSE }}
         run: |
-          .\scripts\smoke-test.ps1 -T4SDK
+          .\scripts\smoke-test.ps1 -T4SDK -RequireConnect
           if ($LASTEXITCODE -ne 0) { throw "Smoke test failed with exit code $LASTEXITCODE" }
 
       - name: Upload artifacts

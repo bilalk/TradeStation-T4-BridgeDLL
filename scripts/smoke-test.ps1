@@ -35,6 +35,13 @@
 
 .EXAMPLE
     .\scripts\smoke-test.ps1 -T4SDK
+
+.EXAMPLE
+    .\scripts\smoke-test.ps1 -T4SDK -RequireConnect
+
+.PARAMETER RequireConnect
+    When present, a CONNECT failure is treated as fatal (exit 1).
+    Use in CI when real T4 credentials are available and must be validated.
 #>
 
 [CmdletBinding()]
@@ -42,7 +49,8 @@ param(
     [string]$PipeName    = "BridgeT4Pipe",
     [string]$ConfigPath  = "",
     [string]$PlaceRequest = "",
-    [switch]$T4SDK
+    [switch]$T4SDK,
+    [switch]$RequireConnect
 )
 
 $ErrorActionPreference = "Stop"
@@ -149,8 +157,13 @@ try {
     # CONNECT
     $resp = Send-Command "CONNECT"
     if ($resp -notmatch "^OK") {
-        Write-Host "  CONNECT failed: $resp" -ForegroundColor Yellow
-        # Not fatal in smoke test (REAL connector may not have creds)
+        if ($RequireConnect) {
+            Write-Host "  CONNECT FAILED (fatal with -RequireConnect): $resp" -ForegroundColor Red
+            $failed = $true
+        } else {
+            Write-Host "  CONNECT failed: $resp" -ForegroundColor Yellow
+            # Not fatal in smoke test (REAL connector may not have creds)
+        }
     } else {
         Write-Host "  CONNECT OK" -ForegroundColor Green
     }
