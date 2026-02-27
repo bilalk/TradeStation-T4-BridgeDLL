@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>BridgeDotNetWorker</AssemblyName>
+    <RootNamespace>BridgeDotNetWorker</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <SelfContained>false</SelfContained>
+    <!-- Publish as single-file self-contained for distribution -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <!--
+    CTS Futures T4 API packages.
+
+    The CTS Futures NuGet profile (https://www.nuget.org/profiles/CTSFutures)
+    publishes the T4 connectivity libraries.  The primary package for FIX/API
+    connectivity is T4.Api (namespace CTS.T4.API).
+
+    If the package is not available in the CI NuGet feed, the IT4Connector
+    abstraction below will fall back to a stub implementation that logs what
+    would have been done.  Uncomment the PackageReference lines when the
+    packages are confirmed available.
+  -->
+  <!--
+  <ItemGroup>
+    <PackageReference Include="T4.Api" Version="*" />
+  </ItemGroup>
+  -->
+
+</Project>
