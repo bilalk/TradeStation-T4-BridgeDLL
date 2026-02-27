@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# VS build outputs
+x64/
+Debug/
+Release/
+*.suo
+*.user
+*.VC.db
+*.VC.VC.opendb
+*.sdf
+*.ipch
+*.ncb
+*.opensdf
+.vs/
+
+# .NET build outputs
+dotnet/**/bin/
+dotnet/**/obj/
+
+# Config with real credentials – NEVER commit this file
+config/bridge.json
+
+# Log files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+_codeql_detected_source_root
