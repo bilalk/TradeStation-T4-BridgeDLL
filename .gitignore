@@ -1,0 +1,23 @@
+# Build artifacts
+x64/
+Debug/
+Release/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# NuGet / .NET build artifacts
+dotnet/**/bin/
+dotnet/**/obj/
+*.nuget.cache
+
+# CodeQL
+_codeql_detected_source_root
+
+# Visual Studio
+.vs/
+*.user
