@@ -1,3 +1,6 @@
+# CodeQL analysis artifacts
+_codeql_detected_source_root
+
 # Build output directories
 x64/
 Debug/
