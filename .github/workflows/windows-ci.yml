@@ -10,44 +10,115 @@ on:
 jobs:
   build-and-test:
     runs-on: windows-2022
+    env:
+      # Set at job level so the smoke-test condition can reference it.
+      BRIDGE_T4_USER: ${{ secrets.BRIDGE_T4_USER }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build solution
-        shell: pwsh
-        run: .\scripts\build-windows.ps1 -Configuration Release -Platform x64
+      # -----------------------------------------------------------------------
+      # Setup .NET 8
+      # -----------------------------------------------------------------------
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
-      - name: Run unit tests
+      # -----------------------------------------------------------------------
+      # Build C++ solution (BridgeCore + BridgeDLL + BridgeCoreTests)
+      # -----------------------------------------------------------------------
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build C++ solution (Release|x64)
+        shell: pwsh
+        run: |
+          msbuild TradeStation-T4-BridgeDLL.sln `
+            /m /p:Configuration=Release /p:Platform=x64 `
+            /p:TreatWarningsAsErrors=false
+
+      # -----------------------------------------------------------------------
+      # Build .NET worker
+      # -----------------------------------------------------------------------
+      - name: Build .NET worker
+        shell: pwsh
+        run: |
+          dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj `
+            -c Release --nologo
+
+      # -----------------------------------------------------------------------
+      # Create a minimal non-secret config/bridge.json for CI.
+      # This allows TestConfigFileLoad to exercise the config-loading path
+      # without real credentials.  The file is NOT committed (gitignored).
+      # -----------------------------------------------------------------------
+      - name: Create CI config/bridge.json (no credentials)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path config | Out-Null
+          $cfg = @{
+            adapterType      = "DOTNET"
+            dotnetWorkerPath = "dotnet\BridgeDotNetWorker\bin\Release\net8.0-windows\BridgeDotNetWorker.exe"
+            pipeName         = "\\.\pipe\BridgeCITest"
+            t4Host           = "uhfix-sim.t4login.com"
+            t4Port           = 10443
+            logPath          = "bridge-ci.log"
+          }
+          $cfg | ConvertTo-Json | Set-Content config\bridge.json -Encoding UTF8
+          Write-Host "CI config/bridge.json created (no credentials)."
+
+      # -----------------------------------------------------------------------
+      # Run C++ unit tests
+      # -----------------------------------------------------------------------
+      - name: Run BridgeCoreTests
         shell: pwsh
         run: |
           $exe = "x64\Release\BridgeCoreTests.exe"
           if (-not (Test-Path $exe)) { throw "Test executable not found: $exe" }
           & $exe
-          if ($LASTEXITCODE -ne 0) { throw "Unit tests failed with exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "BridgeCoreTests failed with exit code $LASTEXITCODE" }
 
-      - name: Collect logs
-        if: always()
+      # -----------------------------------------------------------------------
+      # (Optional) Real connectivity smoke test – only runs if secrets exist
+      # -----------------------------------------------------------------------
+      - name: Run .NET worker CONNECT smoke test
+        if: ${{ env.BRIDGE_T4_USER != '' }}
         shell: pwsh
+        env:
+          BRIDGE_T4_USER:     ${{ secrets.BRIDGE_T4_USER }}
+          BRIDGE_T4_PASSWORD: ${{ secrets.BRIDGE_T4_PASSWORD }}
+          BRIDGE_T4_LICENSE:  ${{ secrets.BRIDGE_T4_LICENSE }}
+          BRIDGE_ADAPTER_TYPE: DOTNET
         run: |
-          if (Test-Path "logs") {
-            Get-ChildItem logs -Recurse | ForEach-Object { Write-Host $_.FullName }
-          } else {
-            Write-Host "No logs directory found."
-          }
+          $worker = "dotnet\BridgeDotNetWorker\bin\Release\net8.0-windows\BridgeDotNetWorker.exe"
+          Start-Process -FilePath $worker -ArgumentList "--pipe \\.\pipe\BridgeSmoke" -NoNewWindow
+          Start-Sleep -Seconds 2
+          # Send PING via PowerShell named pipe client
+          $pipe = New-Object System.IO.Pipes.NamedPipeClientStream(".", "BridgeSmoke", [System.IO.Pipes.PipeDirection]::InOut)
+          $pipe.Connect(5000)
+          $writer = New-Object System.IO.StreamWriter($pipe)
+          $writer.AutoFlush = $true
+          $reader = New-Object System.IO.StreamReader($pipe)
+          $writer.WriteLine("PING")
+          $resp = $reader.ReadLine()
+          Write-Host "PING response: $resp"
+          if ($resp -ne "PONG") { throw "Expected PONG, got: $resp" }
+          $writer.WriteLine("CONNECT")
+          $resp = $reader.ReadLine()
+          Write-Host "CONNECT response: $resp"
+          $pipe.Close()
 
+      # -----------------------------------------------------------------------
+      # Upload artifacts
+      # -----------------------------------------------------------------------
       - name: Upload artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bridge-release
           path: |
-            x64/Release/BridgeDLL.dll
-            x64/Release/BridgeDLL.lib
-            x64/Release/BridgeCoreTests.exe
-            x64/Release/BridgeTestConsole.exe
-            docs/
-            config/bridge.example.json
-            logs/
+            x64\Release\BridgeDLL.dll
+            x64\Release\BridgeDLL.pdb
+            x64\Release\BridgeCoreTests.exe
+            dotnet\BridgeDotNetWorker\bin\Release\net8.0-windows\
 
