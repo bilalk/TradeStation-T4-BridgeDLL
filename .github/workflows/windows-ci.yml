@@ -15,17 +15,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show repo files (debug)
+      - name: Build solution
         shell: pwsh
-        run: |
-          Write-Host "Repo root:"
-          Get-ChildItem -Force
-          if (Test-Path .github) { Write-Host "`n.github:"; Get-ChildItem -Recurse .github -Force }
+        run: .\scripts\build-windows.ps1 -Configuration Release -Platform x64
 
-      # This placeholder step makes CI succeed even before code exists.
-      # Once the agent adds a .sln, we'll replace this with MSBuild + tests.
-      - name: Placeholder - no code yet
+      - name: Run unit tests
         shell: pwsh
         run: |
-          Write-Host "No build yet. Waiting for the agent to add C++ solution + tests."
-          exit 0
+          $exe = "x64\Release\BridgeCoreTests.exe"
+          if (-not (Test-Path $exe)) { throw "Test executable not found: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "Unit tests failed with exit code $LASTEXITCODE" }
+
+      - name: Collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "logs") {
+            Get-ChildItem logs -Recurse | ForEach-Object { Write-Host $_.FullName }
+          } else {
+            Write-Host "No logs directory found."
+          }
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-release
+          path: |
+            x64/Release/BridgeDLL.dll
+            x64/Release/BridgeDLL.lib
+            x64/Release/BridgeCoreTests.exe
+            x64/Release/BridgeTestConsole.exe
+            docs/
+            config/bridge.example.json
+            logs/
+
