@@ -19,6 +19,12 @@ jobs:
         shell: pwsh
         run: .\scripts\build-windows.ps1 -Configuration Release -Platform x64
 
+      - name: Build .NET worker
+        shell: pwsh
+        run: |
+          dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw ".NET worker build failed with exit code $LASTEXITCODE" }
+
       - name: Run unit tests
         shell: pwsh
         run: |
@@ -37,6 +43,20 @@ jobs:
             Write-Host "No logs directory found."
           }
 
+      - name: T4 Smoke Test (real connector)
+        if: ${{ secrets.BRIDGE_T4_USER != '' }}
+        shell: pwsh
+        env:
+          BRIDGE_CONNECTOR: ${{ secrets.BRIDGE_CONNECTOR }}
+          T4_HOST: ${{ secrets.BRIDGE_T4_HOST }}
+          T4_PORT: ${{ secrets.BRIDGE_T4_PORT }}
+          T4_USERNAME: ${{ secrets.BRIDGE_T4_USER }}
+          T4_PASSWORD: ${{ secrets.BRIDGE_T4_PASSWORD }}
+          T4_LICENSE_KEY: ${{ secrets.BRIDGE_T4_LICENSE }}
+        run: |
+          .\scripts\smoke-test.ps1 -T4SDK
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test failed with exit code $LASTEXITCODE" }
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -47,6 +67,7 @@ jobs:
             x64/Release/BridgeDLL.lib
             x64/Release/BridgeCoreTests.exe
             x64/Release/BridgeTestConsole.exe
+            dotnet/BridgeDotNetWorker/bin/Release/
             docs/
             config/bridge.example.json
             logs/
