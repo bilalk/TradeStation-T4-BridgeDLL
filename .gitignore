@@ -1,0 +1,42 @@
+# CodeQL analysis artifacts
+_codeql_detected_source_root
+
+# Build output directories
+x64/
+Debug/
+Release/
+Win32/
+ipch/
+.vs/
+
+# Object files and intermediate build files
+*.obj
+*.pch
+*.idb
+*.pdb
+*.ilk
+*.exp
+*.suo
+*.user
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# Log files (keep directory, ignore content)
+logs/*.log
+
+# Config with secrets (commit only the example)
+config/bridge.json
+
+# CMake (if ever used)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Temp/swap
+*.tmp
+*.bak
+*~

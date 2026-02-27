@@ -1,0 +1,3 @@
+# Keep logs directory in version control but ignore actual log files
+*
+!.gitkeep

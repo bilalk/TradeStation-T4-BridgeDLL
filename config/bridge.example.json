@@ -1,0 +1,16 @@
+{
+  "adapterType": "MOCK",
+  "logFilePath": "logs/bridge.log",
+  "logToConsole": false,
+  "_comment_adapters": "Supported: MOCK (default), FIX (stub), DOTNET (stub)",
+  "_comment_fix": {
+    "fixHost": "127.0.0.1",
+    "fixPort": 9876,
+    "fixSenderCompId": "CLIENT",
+    "fixTargetCompId": "SERVER"
+  },
+  "_comment_dotnet": {
+    "dotnetAssemblyPath": "path/to/T4Adapter.dll",
+    "dotnetClassName": "T4.BrokerAdapter"
+  }
+}
