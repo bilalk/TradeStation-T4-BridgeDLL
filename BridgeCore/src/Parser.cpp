@@ -59,10 +59,19 @@ int ParsePayload(const std::string& payload, OrderRequest& out) noexcept {
             else if (ku == "ACCOUNT")     out.account     = val;
             else if (ku == "INSTRUMENT")  out.instrument  = val;
             else if (ku == "ACTION")      out.action      = ParseAction(val);
-            else if (ku == "QUANTITY")    out.quantity    = std::stoi(val);
+            else if (ku == "QUANTITY")    {
+                if (val.empty()) return RC_INVALID_PARAM;
+                out.quantity = std::stoi(val);
+            }
             else if (ku == "ORDERTYPE")   out.orderType   = ParseOrderType(val);
-            else if (ku == "LIMITPRICE")  out.limitPrice  = std::stod(val);
-            else if (ku == "STOPPRICE")   out.stopPrice   = std::stod(val);
+            else if (ku == "LIMITPRICE")  {
+                if (val.empty()) return RC_INVALID_PARAM;
+                out.limitPrice = std::stod(val);
+            }
+            else if (ku == "STOPPRICE")   {
+                if (val.empty()) return RC_INVALID_PARAM;
+                out.stopPrice = std::stod(val);
+            }
             else if (ku == "TIMEINFORCE") out.timeInForce = ParseTimeInForce(val);
         }
         return ValidateRequest(out);
