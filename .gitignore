@@ -1,0 +1,32 @@
+# Build artifacts
+x64/
+Debug/
+Release/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.dll
+*.exe
+
+# .NET
+obj/
+bin/
+*.nupkg
+**/obj/
+**/bin/
+
+# config with credentials
+config/bridge.json
+
+# CodeQL
+_codeql_detected_source_root
