@@ -17,9 +17,9 @@ Use this when each parameter is a separate variable.
 ```easylanguage
 DefineDLLFunc: "BridgeDLL.dll",
     INT, "PLACE_ORDER_W",
-    WSTRING, WSTRING, WSTRING, WSTRING,
-    INT,
-    WSTRING, DOUBLE, DOUBLE, WSTRING;
+    WSTRING, WSTRING,
+    DOUBLE, DOUBLE,
+    WSTRING, WSTRING;
 ```
 
 ### EasyLanguage Call Example
@@ -29,35 +29,34 @@ vars:
     DLLResult(0);
 
 DLLResult = PLACE_ORDER_W(
-    "PLACE",      { command        }
+    "ESZ4",       { symbol         }
     "ACC001",     { account        }
-    "ES",         { instrument     }
-    "BUY",        { action         }
-    1,            { quantity       }
-    "MARKET",     { orderType      }
-    0.0,          { limitPrice     }
-    0.0,          { stopPrice      }
-    "DAY"         { timeInForce    }
+    1.0,          { quantity       }
+    4500.0,       { price (0 for MARKET) }
+    "BUY",        { side           }
+    "LIMIT"       { orderType      }
 );
 
 if DLLResult <> 0 then
     Print("Order failed, code=", DLLResult);
 ```
 
-### Supported Values
+### Parameter Reference
 
-| Parameter   | Accepted values (case-insensitive)              |
-|-------------|-------------------------------------------------|
-| command     | `PLACE`, `CANCEL`, `CANCELALLORDERS`, `CHANGE`, `CLOSEPOSITION`, `CLOSESTRATEGY`, `FLATTENEVERYTHING`, `REVERSEPOSITION` |
-| action      | `BUY`, `SELL`                                   |
-| orderType   | `MARKET`, `LIMIT`, `STOPMARKET`, `STOPLIMIT`    |
-| timeInForce | `DAY`, `GTC`                                    |
+| Parameter | Type   | Description                         |
+|-----------|--------|-------------------------------------|
+| symbol    | string | Instrument symbol (e.g. `"ESZ4"`)   |
+| account   | string | Account identifier                  |
+| qty       | double | Order quantity (must be > 0)        |
+| price     | double | Limit price (0 for MARKET orders)   |
+| side      | string | `"BUY"` or `"SELL"` (case-insensitive) |
+| orderType | string | `"MARKET"` or `"LIMIT"` (case-insensitive) |
 
 ---
 
-## 2. Single Pipe-Delimited Payload Variant (`PLACE_ORDER_CMD_W` / `PLACE_ORDER_CMD_A`)
+## 2. Single Command String Variant (`PLACE_ORDER_CMD_W` / `PLACE_ORDER_CMD_A`)
 
-Use this when you want to build the full command as one string (useful for strategy-level string construction).
+Use this when you want to build the full command as one string.
 
 ### EasyLanguage Declaration
 
@@ -67,13 +66,15 @@ DefineDLLFunc: "BridgeDLL.dll",
     WSTRING;
 ```
 
-### Payload Format
+### Command Format
+
+Space-separated fields:
 
 ```
-command=<CMD>|account=<ACCT>|instrument=<INSTR>|action=<ACT>|quantity=<QTY>|orderType=<OT>|limitPrice=<LP>|stopPrice=<SP>|timeInForce=<TIF>
+SYMBOL ACCOUNT QTY PRICE SIDE TYPE
 ```
 
-Keys are **case-insensitive**. The `|` delimiter separates fields.
+Example: `"ESZ4 MyAcct 1 4500.0 BUY LIMIT"`
 
 ### EasyLanguage Call Example
 
@@ -82,8 +83,7 @@ vars:
     DLLResult(0),
     Payload("");
 
-Payload = "command=PLACE|account=ACC001|instrument=ES|action=BUY|" +
-          "quantity=1|orderType=MARKET|limitPrice=0|stopPrice=0|timeInForce=DAY";
+Payload = "ESZ4 ACC001 1 4500.0 BUY LIMIT";
 
 DLLResult = PLACE_ORDER_CMD_W(Payload);
 
@@ -95,25 +95,10 @@ if DLLResult <> 0 then
 
 ## Return Codes
 
-| Code | Meaning                           |
-|------|-----------------------------------|
-|  `0` | Success (order accepted/queued)   |
-| `-1` | Invalid command                   |
-| `-2` | Invalid parameters                |
-| `-3` | Not connected / adapter unavailable |
-| `-4` | Internal error                    |
-| `-6` | Config error                      |
-
----
-
-## Default Semantics
-
-| Command            | Behaviour                                                   |
-|--------------------|-------------------------------------------------------------|
-| `CANCEL`           | Cancels all working orders for (account + instrument)       |
-| `CHANGE`           | Cancels all working orders for (account + instrument), then places a new order with the provided params |
-| `CLOSESTRATEGY`    | Alias for `FLATTENEVERYTHING` — cancels all working orders  |
-| `CLOSEPOSITION`    | Cancels all working orders for (account + instrument)       |
-| `FLATTENEVERYTHING`| Cancels all working orders across all instruments           |
-| `REVERSEPOSITION`  | Cancels working orders for the position, then places the opposite-side order |
-| `CANCELALLORDERS`  | Cancels all working orders for the given account            |
+| Code | Name              | Meaning                              |
+|------|-------------------|--------------------------------------|
+| `0`  | `RC_SUCCESS`      | Order accepted / operation succeeded |
+| `1`  | `RC_INVALID_PARAM`| Invalid or missing parameters        |
+| `2`  | `RC_NOT_CONNECTED`| Adapter not connected                |
+| `3`  | `RC_TIMEOUT`      | Operation timed out                  |
+| `4`  | `RC_ERROR`        | General error                        |
