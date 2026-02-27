@@ -138,20 +138,15 @@ private:
 
         // Determine worker exe path.
         std::string workerPath = m_cfg.dotnetWorkerPath;
-        if (workerPath.empty()) {
-            // Default: same directory as the DLL, then into dotnet sub-folder.
-            char dllPath[MAX_PATH] = {};
-            HMODULE hMod = nullptr;
-            GetModuleHandleExA(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCSTR>(&SpawnWorker), &hMod);
-            if (hMod) GetModuleFileNameA(hMod, dllPath, MAX_PATH);
-            std::string dir(dllPath);
-            auto sep = dir.rfind('\\');
-            if (sep != std::string::npos) dir = dir.substr(0, sep + 1);
-            workerPath = dir + "dotnet\\BridgeDotNetWorker\\BridgeDotNetWorker.exe";
-        }
-
+if (workerPath.empty()) {
+    // Default: same directory as the module containing this code, then into dotnet sub-folder.
+    std::string dir = GetModuleDirectoryFromAddress(reinterpret_cast<const void*>(&GetModuleDirectoryFromAddress));
+    if (dir.empty()) {
+        Logger::Log("[DotNetAdapter] Failed to determine module directory; cannot locate worker.");
+        return false;
+    }
+    workerPath = dir + "dotnet\\BridgeDotNetWorker\\BridgeDotNetWorker.exe";
+}
         // Convert pipe name to command-line arg.
         std::string cmdLine = "\"" + workerPath + "\" --pipe \"" + m_cfg.pipeName + "\"";
 
