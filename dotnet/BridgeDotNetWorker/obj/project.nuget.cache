@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "SubQv1gGiRA=",
+  "success": true,
+  "projectFilePath": "/home/runner/work/TradeStation-T4-BridgeDLL/TradeStation-T4-BridgeDLL/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/_codeql_detected_source_root/dotnet/BridgeDotNetWorker/BridgeDotNetWorker.csproj",
+  "expectedPackageFiles": [
+    "/tmp/codeql-scratch-d2d7823f019aeeb0/dbs/csharp/working/packages/microsoft.net.illink.tasks/8.0.23/microsoft.net.illink.tasks.8.0.23.nupkg.sha512",
+    "/tmp/codeql-scratch-d2d7823f019aeeb0/dbs/csharp/working/packages/microsoft.netcore.app.ref/8.0.23/microsoft.netcore.app.ref.8.0.23.nupkg.sha512",
+    "/tmp/codeql-scratch-d2d7823f019aeeb0/dbs/csharp/working/packages/microsoft.aspnetcore.app.ref/8.0.23/microsoft.aspnetcore.app.ref.8.0.23.nupkg.sha512",
+    "/tmp/codeql-scratch-d2d7823f019aeeb0/dbs/csharp/working/packages/microsoft.netcore.app.host.win-x64/8.0.23/microsoft.netcore.app.host.win-x64.8.0.23.nupkg.sha512"
+  ],
+  "logs": []
+}
