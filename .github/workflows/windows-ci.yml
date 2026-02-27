@@ -10,6 +10,9 @@ on:
 jobs:
   build-and-test:
     runs-on: windows-2022
+    env:
+      # Set at job level so the smoke-test condition can reference it.
+      BRIDGE_T4_USER: ${{ secrets.BRIDGE_T4_USER }}
 
     steps:
       - name: Checkout

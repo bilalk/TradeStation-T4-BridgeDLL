@@ -64,14 +64,14 @@ public class WorkerConfig
         }
 
         // Environment variable overrides (used in GitHub Actions / CI)
-        cfg.AdapterType  = Env("BRIDGE_ADAPTER_TYPE",       cfg.AdapterType);
-        cfg.PipeName     = Env("BRIDGE_PIPE_NAME",           cfg.PipeName);
-        cfg.T4Host       = Env("BRIDGE_T4_HOST",             cfg.T4Host);
+        cfg.AdapterType  = Env("BRIDGE_ADAPTER_TYPE",   cfg.AdapterType);
+        cfg.PipeName     = Env("BRIDGE_PIPE_NAME",      cfg.PipeName);
+        cfg.T4Host       = Env("BRIDGE_T4_HOST",        cfg.T4Host);
         if (int.TryParse(Env("BRIDGE_T4_PORT", ""), out int port)) cfg.T4Port = port;
-        cfg.T4User       = Env("BRIDGE_T4_USER",             cfg.T4User);
-        cfg.T4Password   = Env("BRIDGE_T4_PASSWORD",         cfg.T4Password);
-        cfg.T4License    = Env("BRIDGE_T4_LICENSE",          cfg.T4License);
-        cfg.LogPath      = Env("BRIDGE_LOG_PATH",            cfg.LogPath);
+        cfg.T4User       = Env("BRIDGE_T4_USER",        cfg.T4User);
+        cfg.T4Password   = Env("BRIDGE_T4_PASSWORD",    cfg.T4Password);
+        cfg.T4License    = Env("BRIDGE_T4_LICENSE",     cfg.T4License);
+        cfg.LogPath      = Env("BRIDGE_LOG_PATH",       cfg.LogPath);
 
         return cfg;
     }
