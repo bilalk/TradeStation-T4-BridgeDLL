@@ -61,8 +61,9 @@ public sealed class PipeServer : IDisposable
 
     private async Task HandleClientAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        using var writer = new StreamWriter(pipe, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+        var utf8NoBom = new UTF8Encoding(false);
+        using var reader = new StreamReader(pipe, utf8NoBom, leaveOpen: true);
+        using var writer = new StreamWriter(pipe, utf8NoBom, leaveOpen: true) { AutoFlush = true };
 
         while (!token.IsCancellationRequested && pipe.IsConnected)
         {
@@ -71,6 +72,7 @@ public sealed class PipeServer : IDisposable
 
             string response = ProcessCommand(line.Trim());
             await writer.WriteLineAsync(response.AsMemory(), token);
+            await writer.FlushAsync();
 
             if (line.Trim().Equals("EXIT", StringComparison.OrdinalIgnoreCase))
             {

@@ -96,14 +96,21 @@ if ($ConfigPath -ne "") {
     $launchArgs += $ConfigPath
 }
 
+$logsDir = Join-Path $repoRoot "logs"
+if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
+
 if (Test-Path $workerExe) {
     $workerProc = Start-Process -FilePath $workerExe `
         -ArgumentList $launchArgs `
-        -PassThru -NoNewWindow
+        -PassThru `
+        -RedirectStandardOutput "$logsDir\worker-stdout.log" `
+        -RedirectStandardError  "$logsDir\worker-stderr.log"
 } else {
     $workerProc = Start-Process -FilePath $dotnet `
         -ArgumentList (@($workerDll) + $launchArgs) `
-        -PassThru -NoNewWindow
+        -PassThru `
+        -RedirectStandardOutput "$logsDir\worker-stdout.log" `
+        -RedirectStandardError  "$logsDir\worker-stderr.log"
 }
 
 # Give the worker a moment to start listening
@@ -138,8 +145,8 @@ try {
         return
     }
 
-    $reader = [System.IO.StreamReader]::new($pipe, [System.Text.Encoding]::UTF8)
-    $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.Encoding]::UTF8)
+    $reader = [System.IO.StreamReader]::new($pipe, [System.Text.UTF8Encoding]::new($false))
+    $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.UTF8Encoding]::new($false))
     $writer.AutoFlush = $true
 
     function Send-Command([string]$cmd) {
