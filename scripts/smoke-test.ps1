@@ -20,9 +20,13 @@
     Optional PLACE command string, e.g. "PLACE ESZ4 BUY 1 4500.00 LIMIT".
     If omitted the PLACE step is skipped.
 
+.PARAMETER RequireConnect
+    When present, a CONNECT failure is treated as a fatal error (exits non-zero).
+    Use this in CI when real T4 credentials are configured.
+
 .PARAMETER T4SDK
     When present, passes /p:T4SDK=true to dotnet build, enabling the real T4 connector.
-    Requires the T4.Api NuGet package to be available (see docs/Build_and_Run.md).
+    Requires the CTS.T4API NuGet package (auto-fetched from nuget.org).
 
 .EXAMPLE
     .\scripts\smoke-test.ps1
@@ -34,7 +38,8 @@
     .\scripts\smoke-test.ps1 -PlaceRequest "PLACE ESZ4 BUY 1 4500.00 LIMIT"
 
 .EXAMPLE
-    .\scripts\smoke-test.ps1 -T4SDK
+    .\scripts\smoke-test.ps1 -T4SDK -RequireConnect
+
 #>
 
 [CmdletBinding()]
@@ -42,7 +47,8 @@ param(
     [string]$PipeName    = "BridgeT4Pipe",
     [string]$ConfigPath  = "",
     [string]$PlaceRequest = "",
-    [switch]$T4SDK
+    [switch]$T4SDK,
+    [switch]$RequireConnect
 )
 
 $ErrorActionPreference = "Stop"
@@ -149,8 +155,13 @@ try {
     # CONNECT
     $resp = Send-Command "CONNECT"
     if ($resp -notmatch "^OK") {
-        Write-Host "  CONNECT failed: $resp" -ForegroundColor Yellow
-        # Not fatal in smoke test (REAL connector may not have creds)
+        if ($RequireConnect) {
+            Write-Host "  CONNECT failed: $resp" -ForegroundColor Red
+            $failed = $true
+        } else {
+            Write-Host "  CONNECT failed: $resp" -ForegroundColor Yellow
+            # Not fatal in smoke test (REAL connector may not have creds)
+        }
     } else {
         Write-Host "  CONNECT OK" -ForegroundColor Green
     }

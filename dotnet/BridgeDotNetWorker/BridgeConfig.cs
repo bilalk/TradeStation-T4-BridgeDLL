@@ -16,6 +16,7 @@ public sealed class BridgeConfig
     public string T4Host     { get; set; } = "uhfix-sim.t4login.com";
     public int    T4Port     { get; set; } = 10443;
     public string T4Username { get; set; } = string.Empty;
+    public string T4Firm     { get; set; } = string.Empty;
 
     // ── Secrets: only from env vars, never persisted in JSON ─────────────────
     /// <summary>Set via T4_PASSWORD env var. Never stored in config file.</summary>
@@ -61,6 +62,9 @@ public sealed class BridgeConfig
                 if (root.TryGetProperty("t4Username", out prop))
                     cfg.T4Username = prop.GetString() ?? cfg.T4Username;
 
+                if (root.TryGetProperty("t4Firm", out prop))
+                    cfg.T4Firm = prop.GetString() ?? cfg.T4Firm;
+
                 if (root.TryGetProperty("pipeName", out prop))
                     cfg.PipeName = prop.GetString() ?? cfg.PipeName;
             }
@@ -70,16 +74,17 @@ public sealed class BridgeConfig
             }
         }
 
-        // 2. Env-var overrides (always take precedence)
-        cfg.Connector   = Env("BRIDGE_CONNECTOR")   ?? cfg.Connector;
-        cfg.T4Host      = Env("T4_HOST")            ?? cfg.T4Host;
-        cfg.T4Port      = int.TryParse(Env("T4_PORT"), out int p) ? p : cfg.T4Port;
-        cfg.T4Username  = Env("T4_USERNAME")        ?? cfg.T4Username;
-        cfg.PipeName    = Env("BRIDGE_PIPE_NAME")   ?? cfg.PipeName;
+        // 2. Env-var overrides (always take precedence; BRIDGE_T4_* are fallbacks for T4_*)
+        cfg.Connector   = Env("BRIDGE_CONNECTOR")                        ?? cfg.Connector;
+        cfg.T4Host      = Env("T4_HOST")    ?? Env("BRIDGE_T4_HOST")     ?? cfg.T4Host;
+        cfg.T4Port      = int.TryParse(Env("T4_PORT") ?? Env("BRIDGE_T4_PORT"), out int p) ? p : cfg.T4Port;
+        cfg.T4Username  = Env("T4_USERNAME") ?? Env("BRIDGE_T4_USER")    ?? cfg.T4Username;
+        cfg.T4Firm      = Env("T4_FIRM")    ?? Env("BRIDGE_T4_FIRM")     ?? cfg.T4Firm;
+        cfg.PipeName    = Env("BRIDGE_PIPE_NAME")                        ?? cfg.PipeName;
 
         // 3. Secrets only from env vars
-        cfg.T4Password   = Env("T4_PASSWORD");
-        cfg.T4LicenseKey = Env("T4_LICENSE_KEY");
+        cfg.T4Password   = Env("T4_PASSWORD")   ?? Env("BRIDGE_T4_PASSWORD");
+        cfg.T4LicenseKey = Env("T4_LICENSE_KEY") ?? Env("BRIDGE_T4_LICENSE");
 
         return cfg;
     }

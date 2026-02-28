@@ -33,6 +33,12 @@ jobs:
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "Unit tests failed with exit code $LASTEXITCODE" }
 
+      - name: Smoke test (stub connector)
+        shell: pwsh
+        run: |
+          .\scripts\smoke-test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Stub smoke test failed with exit code $LASTEXITCODE" }
+
       - name: Collect logs
         if: always()
         shell: pwsh
@@ -43,8 +49,30 @@ jobs:
             Write-Host "No logs directory found."
           }
 
-      - name: T4 Smoke Test (real connector)
-        if: ${{ secrets.BRIDGE_T4_USER != '' }}
+      - name: Check T4 credentials
+        id: t4-creds
+        shell: pwsh
+        env:
+          BRIDGE_T4_USER: ${{ secrets.BRIDGE_T4_USER }}
+        run: |
+          if ($env:BRIDGE_T4_USER -ne "") {
+            Write-Host "T4 credentials are configured – real T4 smoke test will run."
+            echo "available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "T4 credentials not configured – skipping real T4 smoke test."
+            Write-Host "To enable, add repository secrets: BRIDGE_T4_USER, BRIDGE_T4_PASSWORD, BRIDGE_T4_HOST, BRIDGE_T4_PORT, BRIDGE_T4_LICENSE, BRIDGE_CONNECTOR"
+            echo "available=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build .NET worker (T4SDK)
+        if: steps.t4-creds.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release --nologo /p:T4SDK=true
+          if ($LASTEXITCODE -ne 0) { throw ".NET worker T4SDK build failed with exit code $LASTEXITCODE" }
+
+      - name: Smoke test (real T4 connector)
+        if: steps.t4-creds.outputs.available == 'true'
         shell: pwsh
         env:
           BRIDGE_CONNECTOR: ${{ secrets.BRIDGE_CONNECTOR }}
@@ -54,8 +82,8 @@ jobs:
           T4_PASSWORD: ${{ secrets.BRIDGE_T4_PASSWORD }}
           T4_LICENSE_KEY: ${{ secrets.BRIDGE_T4_LICENSE }}
         run: |
-          .\scripts\smoke-test.ps1 -T4SDK
-          if ($LASTEXITCODE -ne 0) { throw "Smoke test failed with exit code $LASTEXITCODE" }
+          .\scripts\smoke-test.ps1 -T4SDK -RequireConnect
+          if ($LASTEXITCODE -ne 0) { throw "Real T4 smoke test failed with exit code $LASTEXITCODE" }
 
       - name: Upload artifacts
         if: always()

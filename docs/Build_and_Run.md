@@ -141,14 +141,14 @@ Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.
 
 ### Enabling the Real T4 Connector
 
-1. Obtain the **T4.Api** NuGet package from CTS Futures.  
-   Add it to the project or drop it in a local NuGet feed.
+1. The **CTS.T4API** NuGet package (from CTSFutures on nuget.org) is used automatically when `T4SDK=true` is set.  
+   It is pulled from nuget.org during the build — no manual installation is needed.
 
 2. Build with the `T4SDK` property:
    ```powershell
    dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release /p:T4SDK=true
    ```
-   This enables the `REAL_T4_SDK` compile-time constant and references `T4.Api`.
+   This enables the `REAL_T4_SDK` compile-time constant and references `CTS.T4API`.
 
 3. Set credentials via environment variables (never in config files):
    ```powershell
@@ -156,6 +156,7 @@ Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.
    $env:T4_USERNAME      = "your-sim-username"
    $env:T4_PASSWORD      = "your-sim-password"
    $env:T4_LICENSE_KEY   = "your-license-key"   # if required
+   $env:T4_FIRM          = "your-firm-id"        # if required
    ```
 
 4. Run the smoke test (see below).
@@ -180,8 +181,11 @@ Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.
 # Include a PLACE request
 .\scripts\smoke-test.ps1 -PlaceRequest "PLACE ESZ4 BUY 1 4500.00 LIMIT"
 
-# Build with REAL SDK enabled (requires T4.Api NuGet)
+# Build with REAL SDK enabled (requires CTS.T4API NuGet, auto-fetched from nuget.org)
 .\scripts\smoke-test.ps1 -T4SDK
+
+# Build with REAL SDK and require CONNECT to succeed (used in CI with credentials)
+.\scripts\smoke-test.ps1 -T4SDK -RequireConnect
 ```
 
 The script exits with code `0` on success and non-zero on failure.
@@ -210,8 +214,10 @@ The workflow `.github/workflows/windows-ci.yml` automatically:
 
 When the repository secret `BRIDGE_T4_USER` is set, the workflow also:
 
-6. Builds `BridgeDotNetWorker` with `/p:T4SDK=true` (enables the real T4 connector).
-7. Runs `scripts/smoke-test.ps1 -T4SDK` against the T4 simulator.
+5. Runs a basic stub smoke test (PING + CONNECT via stub connector) — always runs.
+6. Checks for T4 credentials and sets a step output (`t4-creds.available`).
+7. When credentials are present: builds `BridgeDotNetWorker` with `/p:T4SDK=true` (enables the real T4 connector via `CTS.T4API` NuGet, auto-fetched from nuget.org).
+8. Runs `scripts/smoke-test.ps1 -T4SDK -RequireConnect` against the T4 simulator. CONNECT failure is fatal.
 
 The following repository secrets control this step:
 
