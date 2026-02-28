@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 namespace {
 
-static std::atomic<unsigned int> g_reqCounter{ 0 };
+static std::atomic<unsigned int> g_reqCounter{ 0 }; 
 
 // SEH wrapper — must be in its own function with NO C++ objects that need
 // unwinding (std::string etc.) to avoid MSVC error C2712.
