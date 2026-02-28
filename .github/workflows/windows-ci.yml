@@ -43,8 +43,16 @@ jobs:
             Write-Host "No logs directory found."
           }
 
+      - name: Smoke test (stub connector)
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          .\scripts\smoke-test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test (stub) failed with exit code $LASTEXITCODE" }
+
       - name: T4 Smoke Test (real connector)
         if: ${{ secrets.BRIDGE_T4_USER != '' }}
+        timeout-minutes: 5
         shell: pwsh
         env:
           BRIDGE_CONNECTOR: ${{ secrets.BRIDGE_CONNECTOR }}

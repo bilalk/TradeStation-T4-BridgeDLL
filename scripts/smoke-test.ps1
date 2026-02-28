@@ -24,6 +24,14 @@
     When present, passes /p:T4SDK=true to dotnet build, enabling the real T4 connector.
     Requires the T4.Api NuGet package to be available (see docs/Build_and_Run.md).
 
+.PARAMETER RequireConnect
+    When present, a failed CONNECT response is treated as a fatal error (non-zero exit).
+    By default CONNECT failure is only a warning (real connector may not have creds).
+
+.PARAMETER ReadTimeoutSec
+    Seconds to wait for a response from the pipe before treating it as a timeout error.
+    Defaults to 10.
+
 .EXAMPLE
     .\scripts\smoke-test.ps1
 
@@ -35,14 +43,19 @@
 
 .EXAMPLE
     .\scripts\smoke-test.ps1 -T4SDK
+
+.EXAMPLE
+    .\scripts\smoke-test.ps1 -RequireConnect
 #>
 
 [CmdletBinding()]
 param(
-    [string]$PipeName    = "BridgeT4Pipe",
-    [string]$ConfigPath  = "",
-    [string]$PlaceRequest = "",
-    [switch]$T4SDK
+    [string]$PipeName       = "BridgeT4Pipe",
+    [string]$ConfigPath     = "",
+    [string]$PlaceRequest   = "",
+    [switch]$T4SDK,
+    [switch]$RequireConnect,
+    [int]$ReadTimeoutSec    = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -132,14 +145,24 @@ try {
     function Send-Command([string]$cmd) {
         Write-Host "  >> $cmd"
         $writer.WriteLine($cmd)
-        $resp = $reader.ReadLine()
+        $task = $reader.ReadLineAsync()
+        try {
+            if (-not $task.Wait([System.TimeSpan]::FromSeconds($ReadTimeoutSec))) {
+                Write-Host "  << (no response after ${ReadTimeoutSec}s)" -ForegroundColor Red
+                return $null
+            }
+        } catch {
+            Write-Host "  << (read error: $_)" -ForegroundColor Red
+            return $null
+        }
+        $resp = $task.Result
         Write-Host "  << $resp"
         return $resp
     }
 
     # PING
     $resp = Send-Command "PING"
-    if ($resp -notmatch "^OK") {
+    if ($null -eq $resp -or $resp -notmatch "^OK") {
         Write-Host "  PING failed: $resp" -ForegroundColor Red
         $failed = $true
     } else {
@@ -148,9 +171,14 @@ try {
 
     # CONNECT
     $resp = Send-Command "CONNECT"
-    if ($resp -notmatch "^OK") {
-        Write-Host "  CONNECT failed: $resp" -ForegroundColor Yellow
-        # Not fatal in smoke test (REAL connector may not have creds)
+    if ($null -eq $resp -or $resp -notmatch "^OK") {
+        if ($RequireConnect) {
+            Write-Host "  CONNECT failed (fatal): $resp" -ForegroundColor Red
+            $failed = $true
+        } else {
+            Write-Host "  CONNECT failed: $resp" -ForegroundColor Yellow
+            # Not fatal in smoke test (REAL connector may not have creds)
+        }
     } else {
         Write-Host "  CONNECT OK" -ForegroundColor Green
     }
@@ -159,7 +187,7 @@ try {
     if ($PlaceRequest -ne "") {
         Write-Host "[4/4] Sending PLACE request …"
         $resp = Send-Command $PlaceRequest
-        if ($resp -notmatch "^OK") {
+        if ($null -eq $resp -or $resp -notmatch "^OK") {
             Write-Host "  PLACE failed: $resp" -ForegroundColor Yellow
         } else {
             Write-Host "  PLACE OK" -ForegroundColor Green
