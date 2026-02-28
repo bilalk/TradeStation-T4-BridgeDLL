@@ -129,7 +129,7 @@ BRIDGETS_API int __stdcall PLACE_ORDER(
         " orderType=" + std::string(orderType ? orderType : "<null>") +
         " limitPrice=" + std::to_string(limitPrice) +
         " stopPrice=" + std::to_string(stopPrice) +
-        " tif=" + std::string(timeInForce ? timeInForce : "<null>");
+        " tif=" + std::string(timeInForce ? timeInForce : "<null>"));
 
     Bridge::OrderRequest req;
     int rc = Bridge::BuildRequest(command, account, instrument, action,
