@@ -1,14 +1,57 @@
 # TradeStation EasyLanguage Usage Guide
 
-This guide shows how to call the `BridgeDLL.dll` exported functions from TradeStation's EasyLanguage.
+This guide shows how to call the `BridgeDLL.dll` / `BridgeTS.dll` exported functions from TradeStation's EasyLanguage.
 
 ## Prerequisite
 
-Place `BridgeDLL.dll` (and its dependencies) in your TradeStation installation folder or a directory on the system `PATH`.
+Place the DLL (and its dependencies) in your TradeStation installation folder or a directory on the system `PATH`.
 
 ---
 
-## 1. Multi-Argument Variant (`PLACE_ORDER_W` / `PLACE_ORDER_A`)
+## 0. Simplified ANSI Entry Point: `PLACE_ORDER` (BridgeTS.dll — recommended for TradeStation 10)
+
+Use **`BridgeTS.dll`** for the cleanest single-function interface.  Copy `BridgeTS.dll` to
+`C:\Program Files\TradeStation 10.0\Program\`.
+
+### EasyLanguage Declaration
+
+```easylanguage
+DefineDLLFunc: "BridgeTS.dll",
+    INT, "PLACE_ORDER",
+    LPSTR, LPSTR, LPSTR, LPSTR,
+    INT,
+    LPSTR, DOUBLE, DOUBLE, LPSTR;
+```
+
+### EasyLanguage Call Example
+
+```easylanguage
+vars:
+    DLLResult(0);
+
+if LastBarOnChart then begin
+    DLLResult = PLACE_ORDER(
+        "PLACE",      { command        }
+        "ACC001",     { account        }
+        "ESH26",      { instrument     }
+        "BUY",        { action         }
+        1,            { quantity       }
+        "MARKET",     { orderType      }
+        0.0,          { limitPrice     }
+        0.0,          { stopPrice      }
+        "DAY"         { timeInForce    }
+    );
+
+    if DLLResult = 0 then
+        Print("Order placed successfully")
+    else
+        Print("Order failed, code=", DLLResult);
+end;
+```
+
+---
+
+## 1. Multi-Argument Variant (`PLACE_ORDER_W` / `PLACE_ORDER_A`) — BridgeDLL.dll
 
 Use this when each parameter is a separate variable.
 

@@ -11,6 +11,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BridgeTestConsole", "Bridge
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BridgeCoreTests", "BridgeCoreTests\BridgeCoreTests.vcxproj", "{4D5E6F7A-B8C9-0123-4567-890123DEF012}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BridgeTS", "BridgeTS\BridgeTS.vcxproj", "{5E6F7A8B-C9D0-1234-5678-901234EF0123}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BridgeTSTests", "BridgeTSTests\BridgeTSTests.vcxproj", "{6F7A8B9C-D0E1-2345-6789-012345F01234}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -33,6 +37,14 @@ Global
 		{4D5E6F7A-B8C9-0123-4567-890123DEF012}.Debug|x64.Build.0 = Debug|x64
 		{4D5E6F7A-B8C9-0123-4567-890123DEF012}.Release|x64.ActiveCfg = Release|x64
 		{4D5E6F7A-B8C9-0123-4567-890123DEF012}.Release|x64.Build.0 = Release|x64
+		{5E6F7A8B-C9D0-1234-5678-901234EF0123}.Debug|x64.ActiveCfg = Debug|x64
+		{5E6F7A8B-C9D0-1234-5678-901234EF0123}.Debug|x64.Build.0 = Debug|x64
+		{5E6F7A8B-C9D0-1234-5678-901234EF0123}.Release|x64.ActiveCfg = Release|x64
+		{5E6F7A8B-C9D0-1234-5678-901234EF0123}.Release|x64.Build.0 = Release|x64
+		{6F7A8B9C-D0E1-2345-6789-012345F01234}.Debug|x64.ActiveCfg = Debug|x64
+		{6F7A8B9C-D0E1-2345-6789-012345F01234}.Debug|x64.Build.0 = Debug|x64
+		{6F7A8B9C-D0E1-2345-6789-012345F01234}.Release|x64.ActiveCfg = Release|x64
+		{6F7A8B9C-D0E1-2345-6789-012345F01234}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
