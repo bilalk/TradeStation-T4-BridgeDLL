@@ -206,9 +206,9 @@ try {
     # EXIT
     Send-Command "EXIT" | Out-Null
 
-    $pipe.Dispose()
-    $reader.Dispose()
-    $writer.Dispose()
+    try { $pipe.Dispose()   } catch { }
+    try { $reader.Dispose() } catch { }
+    try { $writer.Dispose() } catch { }
 
 } finally {
     # ── 4. Tear down worker ───────────────────────────────────────────────────
