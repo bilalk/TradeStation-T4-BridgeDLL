@@ -34,10 +34,10 @@ public sealed class RealT4Connector : IT4Connector
             _connected = false;
             _lastError = string.Empty;
 
-            // Auto-detect simulator vs production based on host name.
+            // Auto-detect simulator vs live based on host name.
             T4.APIServerType serverType = cfg.T4Host.Contains("sim", StringComparison.OrdinalIgnoreCase)
                 ? T4.APIServerType.Simulator
-                : T4.APIServerType.Production;
+                : T4.APIServerType.Live;
 
             _host = new T4.API.Host(
                 serverType,
@@ -78,9 +78,9 @@ public sealed class RealT4Connector : IT4Connector
         }
     }
 
-    private void OnLoginResponse(T4.API.Host host, T4.API.LoginResponseEventArgs args)
+    private void OnLoginResponse(object sender, T4.API.LoginResponseEventArgs args)
     {
-        if (args.Result == T4.LoginResult.Accepted)
+        if (args.Result == T4.LoginResult.Success)
         {
             _connected = true;
         }
