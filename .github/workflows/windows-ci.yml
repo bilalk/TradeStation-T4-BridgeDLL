@@ -33,6 +33,14 @@ jobs:
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "Unit tests failed with exit code $LASTEXITCODE" }
 
+      - name: Run BridgeTSTests
+        shell: pwsh
+        run: |
+          $exe = "x64\Release\BridgeTSTests.exe"
+          if (-not (Test-Path $exe)) { throw "BridgeTSTests executable not found: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "BridgeTSTests failed with exit code $LASTEXITCODE" }
+
       - name: Collect logs
         if: always()
         shell: pwsh
@@ -73,7 +81,10 @@ jobs:
           path: |
             x64/Release/BridgeDLL.dll
             x64/Release/BridgeDLL.lib
+            x64/Release/BridgeTS.dll
+            x64/Release/BridgeTS.lib
             x64/Release/BridgeCoreTests.exe
+            x64/Release/BridgeTSTests.exe
             x64/Release/BridgeTestConsole.exe
             dotnet/BridgeDotNetWorker/bin/Release/
             docs/
