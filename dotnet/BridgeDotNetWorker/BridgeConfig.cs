@@ -24,6 +24,9 @@ public sealed class BridgeConfig
     /// <summary>Set via T4_LICENSE_KEY env var. Never stored in config file.</summary>
     public string? T4LicenseKey { get; private set; }
 
+    /// <summary>Set via T4_FIRM or BRIDGE_T4_FIRM env var. Defaults to empty string.</summary>
+    public string? T4Firm       { get; private set; }
+
     // ── IPC ──────────────────────────────────────────────────────────────────
     public string PipeName { get; set; } = "BridgeT4Pipe";
 
@@ -80,6 +83,7 @@ public sealed class BridgeConfig
         // 3. Secrets only from env vars
         cfg.T4Password   = Env("T4_PASSWORD");
         cfg.T4LicenseKey = Env("T4_LICENSE_KEY");
+        cfg.T4Firm       = Env("T4_FIRM") ?? Env("BRIDGE_T4_FIRM");
 
         return cfg;
     }

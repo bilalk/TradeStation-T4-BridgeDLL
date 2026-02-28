@@ -58,20 +58,38 @@ jobs:
           .\scripts\smoke-test.ps1
           if ($LASTEXITCODE -ne 0) { throw "Smoke test (stub) failed with exit code $LASTEXITCODE" }
 
-      - name: T4 Smoke Test (real connector)
-        if: ${{ secrets.BRIDGE_T4_USER != '' }}
+      - name: Check T4 credentials
+        id: t4-creds
+        shell: pwsh
+        run: |
+          if ('${{ secrets.BRIDGE_T4_USER }}' -ne '') {
+            echo "available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "available=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build .NET worker (T4SDK)
+        if: steps.t4-creds.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release --nologo /p:T4SDK=true
+          if ($LASTEXITCODE -ne 0) { throw ".NET worker (T4SDK) build failed with exit code $LASTEXITCODE" }
+
+      - name: Smoke test (real T4 connector)
+        if: steps.t4-creds.outputs.available == 'true'
         timeout-minutes: 5
         shell: pwsh
         env:
-          BRIDGE_CONNECTOR: ${{ secrets.BRIDGE_CONNECTOR }}
+          BRIDGE_CONNECTOR: REAL
           T4_HOST: ${{ secrets.BRIDGE_T4_HOST }}
           T4_PORT: ${{ secrets.BRIDGE_T4_PORT }}
           T4_USERNAME: ${{ secrets.BRIDGE_T4_USER }}
           T4_PASSWORD: ${{ secrets.BRIDGE_T4_PASSWORD }}
           T4_LICENSE_KEY: ${{ secrets.BRIDGE_T4_LICENSE }}
+          T4_FIRM: ${{ secrets.BRIDGE_T4_FIRM }}
         run: |
-          .\scripts\smoke-test.ps1 -T4SDK
-          if ($LASTEXITCODE -ne 0) { throw "Smoke test failed with exit code $LASTEXITCODE" }
+          .\scripts\smoke-test.ps1 -T4SDK -RequireConnect
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test (real T4) failed with exit code $LASTEXITCODE" }
 
       - name: Upload artifacts
         if: always()
