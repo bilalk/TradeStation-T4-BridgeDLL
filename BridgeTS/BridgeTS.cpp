@@ -121,15 +121,15 @@ BRIDGETS_API int __stdcall PLACE_ORDER(
     }
 
     Bridge::LogInfo(tag + " PLACE_ORDER called"
-        " command=" + (command    ? command    : "<null>") +
-        " account=" + (account    ? account    : "<null>") +
-        " instrument=" + (instrument ? instrument : "<null>") +
-        " action=" + (action     ? action     : "<null>") +
+        " command=" + std::string(command ? command : "<null>") +
+        " account=" + std::string(account ? account : "<null>") +
+        " instrument=" + std::string(instrument ? instrument : "<null>") +
+        " action=" + std::string(action ? action : "<null>") +
         " quantity=" + std::to_string(quantity) +
-        " orderType=" + (orderType  ? orderType  : "<null>") +
+        " orderType=" + std::string(orderType ? orderType : "<null>") +
         " limitPrice=" + std::to_string(limitPrice) +
         " stopPrice=" + std::to_string(stopPrice) +
-        " tif=" + (timeInForce ? timeInForce : "<null>");
+        " tif=" + std::string(timeInForce ? timeInForce : "<null>");
 
     Bridge::OrderRequest req;
     int rc = Bridge::BuildRequest(command, account, instrument, action,
