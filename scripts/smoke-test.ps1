@@ -32,6 +32,15 @@
     Seconds to wait for a response from the pipe before treating it as a timeout error.
     Defaults to 10.
 
+.PARAMETER MaxRetries
+    Maximum number of pipe-connection attempts before giving up.
+    Between attempts the script checks whether the worker has already exited (fail-fast)
+    and waits RetryDelayMs milliseconds.  Defaults to 10.
+
+.PARAMETER RetryDelayMs
+    Milliseconds to wait between consecutive pipe-connection attempts.
+    Defaults to 2000 (2 s).
+
 .EXAMPLE
     .\scripts\smoke-test.ps1
 
@@ -55,7 +64,9 @@ param(
     [string]$PlaceRequest   = "",
     [switch]$T4SDK,
     [switch]$RequireConnect,
-    [int]$ReadTimeoutSec    = 10
+    [int]$ReadTimeoutSec    = 10,
+    [int]$MaxRetries        = 10,
+    [int]$RetryDelayMs      = 2000
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +101,12 @@ if (-not (Test-Path $workerExe) -and -not (Test-Path $workerDll)) {
     exit 1
 }
 
+# Temp files to capture worker output for diagnostics (automatically cleaned up in finally)
+$workerStdout = [System.IO.Path]::GetTempFileName()
+$workerStderr = [System.IO.Path]::GetTempFileName()
+
+# The pipe name is passed explicitly to both the worker (--pipe) and the client below,
+# ensuring they always use the same value from the single $PipeName variable.
 $launchArgs = @("--pipe", $PipeName)
 if ($ConfigPath -ne "") {
     $launchArgs += "--config"
@@ -99,23 +116,49 @@ if ($ConfigPath -ne "") {
 if (Test-Path $workerExe) {
     $workerProc = Start-Process -FilePath $workerExe `
         -ArgumentList $launchArgs `
-        -PassThru -NoNewWindow
+        -PassThru -NoNewWindow `
+        -RedirectStandardOutput $workerStdout `
+        -RedirectStandardError  $workerStderr
 } else {
     $workerProc = Start-Process -FilePath $dotnet `
         -ArgumentList (@($workerDll) + $launchArgs) `
-        -PassThru -NoNewWindow
+        -PassThru -NoNewWindow `
+        -RedirectStandardOutput $workerStdout `
+        -RedirectStandardError  $workerStderr
 }
 
-# Give the worker a moment to start listening
-Start-Sleep -Milliseconds 1500
-
-if ($workerProc.HasExited) {
-    Write-Error "Worker process exited prematurely (code $($workerProc.ExitCode))."
-    exit 1
-}
 Write-Host "      Worker started (PID $($workerProc.Id))." -ForegroundColor Green
 
 $failed = $false
+
+# Helper: emit worker stdout/stderr and recent log files when diagnosing failures.
+function Show-WorkerDiagnostics {
+    Write-Host "--- Worker stdout (last 50 lines) ---" -ForegroundColor Yellow
+    if (Test-Path $workerStdout) {
+        (Get-Content $workerStdout -ErrorAction SilentlyContinue) |
+            Select-Object -Last 50 | ForEach-Object { Write-Host $_ }
+    } else {
+        Write-Host "  (no stdout captured)"
+    }
+    Write-Host "--- Worker stderr (last 50 lines) ---" -ForegroundColor Yellow
+    if (Test-Path $workerStderr) {
+        (Get-Content $workerStderr -ErrorAction SilentlyContinue) |
+            Select-Object -Last 50 | ForEach-Object { Write-Host $_ }
+    } else {
+        Write-Host "  (no stderr captured)"
+    }
+    Write-Host "--- Log files ---" -ForegroundColor Yellow
+    $logDir = Join-Path $repoRoot "logs"
+    if (Test-Path $logDir) {
+        Get-ChildItem $logDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "  $($_.FullName)"
+            Get-Content $_.FullName -ErrorAction SilentlyContinue |
+                Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" }
+        }
+    } else {
+        Write-Host "  (no logs directory)"
+    }
+}
 
 try {
     # ── 3. Connect pipe & send commands ──────────────────────────────────────
@@ -123,20 +166,52 @@ try {
 
     Add-Type -AssemblyName System.IO.Pipes
 
-    $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
-        ".",                # server name (local)
-        $PipeName,
-        [System.IO.Pipes.PipeDirection]::InOut,
-        [System.IO.Pipes.PipeOptions]::None
-    )
+    # Retry/backoff loop: attempt to connect to the named pipe up to $MaxRetries times.
+    # Before each attempt we check whether the worker has already exited so we can
+    # fail fast with useful diagnostics rather than waiting out all retries.
+    $pipe = $null
+    $connected = $false
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        # Fail fast: if the worker has already exited there is no point retrying.
+        if ($workerProc.HasExited) {
+            Write-Host "  Worker exited prematurely (code $($workerProc.ExitCode))." -ForegroundColor Red
+            Show-WorkerDiagnostics
+            $failed = $true
+            break
+        }
 
-    try {
-        $pipe.Connect(5000)   # 5 s timeout
-    } catch {
-        Write-Error "Could not connect to pipe: $_"
-        $failed = $true
-        return
+        Write-Host "  Attempt $attempt/$MaxRetries: connecting to pipe '$PipeName' …"
+        # A fresh NamedPipeClientStream must be created for each attempt because
+        # Connect() renders the stream object unusable after a timeout.
+        $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
+            ".",
+            $PipeName,
+            [System.IO.Pipes.PipeDirection]::InOut,
+            [System.IO.Pipes.PipeOptions]::None
+        )
+        try {
+            $pipe.Connect(1000)   # 1000 ms (1-second) timeout per attempt
+            $connected = $true
+            Write-Host "      Connected on attempt $attempt." -ForegroundColor Green
+            break
+        } catch {
+            $pipe.Dispose()
+            $pipe = $null
+            if ($attempt -lt $MaxRetries) {
+                $retryDelaySec = [math]::Round($RetryDelayMs / 1000.0, 1)
+                Write-Host "  Not ready yet; retrying in ${retryDelaySec}s …"
+                Start-Sleep -Milliseconds $RetryDelayMs
+            }
+        }
     }
+
+    if (-not $connected -and -not $failed) {
+        Write-Host "  Could not connect to pipe '$PipeName' after $MaxRetries attempts." -ForegroundColor Red
+        Show-WorkerDiagnostics
+        $failed = $true
+    }
+
+    if ($failed) { return }
 
     $reader = [System.IO.StreamReader]::new($pipe, [System.Text.Encoding]::UTF8)
     $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.Encoding]::UTF8)
@@ -205,6 +280,11 @@ try {
 
 } finally {
     # ── 4. Tear down worker ───────────────────────────────────────────────────
+    # Dispose the pipe (may already be disposed if connection was never established)
+    if ($null -ne $pipe) {
+        try { $pipe.Dispose() } catch { }
+    }
+
     try {
         if (-not $workerProc.HasExited) {
             $workerProc.WaitForExit(3000) | Out-Null
@@ -213,6 +293,10 @@ try {
             }
         }
     } catch { }
+
+    # Clean up temporary output-capture files
+    Remove-Item -Path $workerStdout -ErrorAction SilentlyContinue
+    Remove-Item -Path $workerStderr -ErrorAction SilentlyContinue
 }
 
 if ($failed) {
