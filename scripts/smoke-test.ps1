@@ -1,4 +1,13 @@
-# Updated content of scripts/smoke-test.ps1 with corrected variable interpolation
+# PowerShell smoke test script
 
-# Example correction
-Write-Host "Retrying the operation, attempt ${MaxRetries}:"
+# This script is for testing purposes.
+
+# Existing code...
+
+# Fixing the PowerShell parser error
+$MaxRetries = 5
+if ($MaxRetries -gt 0) {
+    Write-Host "Retrying... ${MaxRetries}:"
+}
+
+# Continued script content...
