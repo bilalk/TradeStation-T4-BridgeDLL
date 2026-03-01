@@ -22,7 +22,6 @@
 
 .PARAMETER T4SDK
     When present, passes /p:T4SDK=true to dotnet build, enabling the real T4 connector.
-    Requires the T4.Api NuGet package to be available (see docs/Build_and_Run.md).
 
 .PARAMETER RequireConnect
     When present, a failed CONNECT response is treated as a fatal error (non-zero exit).
@@ -32,30 +31,27 @@
     Seconds to wait for a response from the pipe before treating it as a timeout error.
     Defaults to 10.
 
-.EXAMPLE
-    .\scripts\smoke-test.ps1
+.PARAMETER ConnectTimeoutMs
+    Timeout per pipe connect attempt, in milliseconds. Defaults to 1000.
 
-.EXAMPLE
-    .\scripts\smoke-test.ps1 -PipeName MyPipe -ConfigPath .\config\bridge.json
+.PARAMETER MaxConnectRetries
+    Maximum number of pipe connect attempts. Defaults to 10.
 
-.EXAMPLE
-    .\scripts\smoke-test.ps1 -PlaceRequest "PLACE ESZ4 BUY 1 4500.00 LIMIT"
-
-.EXAMPLE
-    .\scripts\smoke-test.ps1 -T4SDK
-
-.EXAMPLE
-    .\scripts\smoke-test.ps1 -RequireConnect
+.PARAMETER ConnectRetryDelayMs
+    Delay between pipe connect attempts, in milliseconds. Defaults to 2000.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$PipeName       = "BridgeT4Pipe",
-    [string]$ConfigPath     = "",
-    [string]$PlaceRequest   = "",
+    [string]$PipeName            = "BridgeT4Pipe",
+    [string]$ConfigPath          = "",
+    [string]$PlaceRequest        = "",
     [switch]$T4SDK,
     [switch]$RequireConnect,
-    [int]$ReadTimeoutSec    = 10
+    [int]$ReadTimeoutSec         = 10,
+    [int]$ConnectTimeoutMs       = 1000,
+    [int]$MaxConnectRetries      = 10,
+    [int]$ConnectRetryDelayMs    = 2000
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,8 +102,8 @@ if (Test-Path $workerExe) {
         -PassThru -NoNewWindow
 }
 
-# Give the worker a moment to start listening
-Start-Sleep -Milliseconds 1500
+# Give the worker a moment to start
+Start-Sleep -Milliseconds 500
 
 if ($workerProc.HasExited) {
     Write-Error "Worker process exited prematurely (code $($workerProc.ExitCode))."
@@ -116,24 +112,50 @@ if ($workerProc.HasExited) {
 Write-Host "      Worker started (PID $($workerProc.Id))." -ForegroundColor Green
 
 $failed = $false
+$pipe = $null
+$reader = $null
+$writer = $null
 
 try {
     # ── 3. Connect pipe & send commands ──────────────────────────────────────
     Write-Host "[3/4] Connecting to pipe '$PipeName' …"
-
     Add-Type -AssemblyName System.IO.Pipes
 
-    $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
-        ".",                # server name (local)
-        $PipeName,
-        [System.IO.Pipes.PipeDirection]::InOut,
-        [System.IO.Pipes.PipeOptions]::None
-    )
+    $connected = $false
 
-    try {
-        $pipe.Connect(5000)   # 5 s timeout
-    } catch {
-        Write-Error "Could not connect to pipe: $_"
+    for ($attempt = 1; $attempt -le $MaxConnectRetries; $attempt++) {
+        if ($workerProc.HasExited) {
+            Write-Error "Worker process exited before pipe connection (code $($workerProc.ExitCode))."
+            $failed = $true
+            break
+        }
+
+        # NOTE: use ${MaxConnectRetries} to avoid PowerShell parsing issues near ':' in strings.
+        Write-Host ("  Attempt {0}/{1}: connecting to pipe …" -f $attempt, $MaxConnectRetries)
+
+        $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
+            ".",                # server name (local)
+            $PipeName,
+            [System.IO.Pipes.PipeDirection]::InOut,
+            [System.IO.Pipes.PipeOptions]::None
+        )
+
+        try {
+            $pipe.Connect($ConnectTimeoutMs)
+            $connected = $true
+            break
+        } catch {
+            try { $pipe.Dispose() } catch { }
+            $pipe = $null
+
+            if ($attempt -lt $MaxConnectRetries) {
+                Start-Sleep -Milliseconds $ConnectRetryDelayMs
+            }
+        }
+    }
+
+    if (-not $connected) {
+        Write-Error "Could not connect to pipe '$PipeName' after $MaxConnectRetries attempt(s)."
         $failed = $true
         return
     }
@@ -145,16 +167,18 @@ try {
     function Send-Command([string]$cmd) {
         Write-Host "  >> $cmd"
         $writer.WriteLine($cmd)
+
         $task = $reader.ReadLineAsync()
         try {
             if (-not $task.Wait([System.TimeSpan]::FromSeconds($ReadTimeoutSec))) {
-                Write-Host "  << (no response after ${ReadTimeoutSec}s)" -ForegroundColor Red
+                Write-Host ("  << (no response after {0}s)" -f $ReadTimeoutSec) -ForegroundColor Red
                 return $null
             }
         } catch {
             Write-Host "  << (read error: $_)" -ForegroundColor Red
             return $null
         }
+
         $resp = $task.Result
         Write-Host "  << $resp"
         return $resp
@@ -199,11 +223,12 @@ try {
     # EXIT
     Send-Command "EXIT" | Out-Null
 
-    $pipe.Dispose()
-    $reader.Dispose()
-    $writer.Dispose()
-
 } finally {
+    # dispose pipe objects
+    try { if ($writer) { $writer.Dispose() } } catch { }
+    try { if ($reader) { $reader.Dispose() } } catch { }
+    try { if ($pipe) { $pipe.Dispose() } } catch { }
+
     # ── 4. Tear down worker ───────────────────────────────────────────────────
     try {
         if (-not $workerProc.HasExited) {
@@ -216,7 +241,7 @@ try {
 }
 
 if ($failed) {
-    Write-Host "" 
+    Write-Host ""
     Write-Host "=== Smoke test FAILED ===" -ForegroundColor Red
     exit 1
 } else {
