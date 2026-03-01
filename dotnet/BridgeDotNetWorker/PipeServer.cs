@@ -19,6 +19,9 @@ public sealed class PipeServer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
 
+    /// <summary>How long the server waits for any single command before closing the connection.</summary>
+    private static readonly TimeSpan IdleReadTimeout = TimeSpan.FromSeconds(60);
+
     public PipeServer(BridgeConfig cfg, IT4Connector connector)
     {
         _cfg       = cfg;
@@ -61,12 +64,27 @@ public sealed class PipeServer : IDisposable
 
     private async Task HandleClientAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        using var writer = new StreamWriter(pipe, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+        using var reader = new StreamReader(pipe, new UTF8Encoding(false), leaveOpen: true);
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
 
         while (!token.IsCancellationRequested && pipe.IsConnected)
         {
-            string? line = await reader.ReadLineAsync(token);
+            string? line;
+            // Apply a per-read idle timeout so the server never blocks forever
+            // if the client connects but never sends a command.
+            using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            idleCts.CancelAfter(IdleReadTimeout);
+
+            try
+            {
+                line = await reader.ReadLineAsync(idleCts.Token);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                Console.Error.WriteLine($"[PipeServer] Idle timeout ({(int)IdleReadTimeout.TotalSeconds} s): no command received. Closing connection.");
+                break;
+            }
+
             if (line is null) break;  // client disconnected
 
             string response = ProcessCommand(line.Trim());
