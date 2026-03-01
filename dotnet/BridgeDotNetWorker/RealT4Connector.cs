@@ -68,9 +68,34 @@ public sealed class RealT4Connector : IT4Connector
             return "ERROR not connected";
         try
         {
-            // Placeholder: real order submission via T4.API would go here.
-            // Return a canned response until the order-routing integration is complete.
-            return $"OK order submitted (stub path): {symbol} {side} {quantity}@{price} {orderType}";
+            var account = _host.Accounts.FirstOrDefault();
+            if (account == null)
+                return "ERROR no accounts available for this user";
+
+            var market = _host.Markets.FirstOrDefault(m =>
+                string.Equals(m.Description, symbol, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.MarketID, symbol, StringComparison.OrdinalIgnoreCase));
+            if (market == null)
+                return $"ERROR market '{symbol}' not found in available T4 markets";
+
+            if (!side.Equals("BUY", StringComparison.OrdinalIgnoreCase) && !side.Equals("SELL", StringComparison.OrdinalIgnoreCase))
+                return $"ERROR invalid side '{side}': expected BUY or SELL";
+            if (!orderType.Equals("LIMIT", StringComparison.OrdinalIgnoreCase) && !orderType.Equals("MARKET", StringComparison.OrdinalIgnoreCase))
+                return $"ERROR invalid orderType '{orderType}': expected LIMIT or MARKET";
+
+            var t4Side = side.Equals("BUY", StringComparison.OrdinalIgnoreCase) ? T4.BuySell.Buy : T4.BuySell.Sell;
+            var t4OrderType = orderType.Equals("LIMIT", StringComparison.OrdinalIgnoreCase) ? T4.PriceType.Limit : T4.PriceType.Market;
+
+            T4.API.Order order = _host.SubmitOrder(
+                account,
+                market,
+                t4Side,
+                t4OrderType,
+                quantity,
+                price
+            );
+
+            return $"OK order submitted: {order.OrderUniqueId}";
         }
         catch (Exception ex)
         {
