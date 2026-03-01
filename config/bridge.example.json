@@ -16,10 +16,16 @@
 
   "_comment_dotnet_worker": "Settings for the optional BridgeDotNetWorker process (see docs/Build_and_Run.md)",
   "connector": "STUB",
-  "_comment_connector": "STUB (default, no credentials needed) | REAL (requires T4.Api NuGet + /p:T4SDK=true)",
+  "_comment_connector": "STUB (default, no credentials needed) | REAL (requires T4.Api NuGet + /p:T4SDK=true) | FIX (FIX 4.2 over TLS, no extra NuGet needed)",
   "t4Host": "uhfix-sim.t4login.com",
   "t4Port": 10443,
   "t4Username": "YOUR_SIMULATOR_USERNAME",
   "_comment_secrets": "Never store t4Password or t4LicenseKey here – use T4_PASSWORD and T4_LICENSE_KEY env vars instead",
+  "_comment_fix_session": "FIX 4.2 session identifiers (all optional – defaults shown below are for T4 simulator)",
+  "fixSenderCompId": "SuperBridge",
+  "fixTargetCompId": "CTS",
+  "fixSenderSubId": "",
+  "fixTargetSubId": "T4FIX",
+  "fixHeartBtInt": 30,
   "pipeName": "BridgeT4Pipe"
 }

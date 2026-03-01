@@ -27,6 +27,22 @@ public sealed class BridgeConfig
     /// <summary>Set via T4_FIRM or BRIDGE_T4_FIRM env var. Defaults to empty string.</summary>
     public string? T4Firm       { get; private set; }
 
+    // ── FIX 4.2 session identifiers ──────────────────────────────────────────
+    /// <summary>FIX SenderCompID sent by this client. Defaults to T4Username when empty.</summary>
+    public string FixSenderCompID { get; set; } = string.Empty;
+
+    /// <summary>FIX TargetCompID of the T4 server. Default: CTS.</summary>
+    public string FixTargetCompID { get; set; } = "CTS";
+
+    /// <summary>FIX SenderSubID. Usually empty for T4.</summary>
+    public string FixSenderSubID  { get; set; } = string.Empty;
+
+    /// <summary>FIX TargetSubID of the T4 server. Default: T4FIX.</summary>
+    public string FixTargetSubID  { get; set; } = "T4FIX";
+
+    /// <summary>FIX HeartBtInt in seconds. Default: 30.</summary>
+    public int    FixHeartBtInt   { get; set; } = 30;
+
     // ── IPC ──────────────────────────────────────────────────────────────────
     public string PipeName { get; set; } = "BridgeT4Pipe";
 
@@ -66,6 +82,21 @@ public sealed class BridgeConfig
 
                 if (root.TryGetProperty("pipeName", out prop))
                     cfg.PipeName = prop.GetString() ?? cfg.PipeName;
+
+                if (root.TryGetProperty("fixSenderCompId", out prop))
+                    cfg.FixSenderCompID = prop.GetString() ?? cfg.FixSenderCompID;
+
+                if (root.TryGetProperty("fixTargetCompId", out prop))
+                    cfg.FixTargetCompID = prop.GetString() ?? cfg.FixTargetCompID;
+
+                if (root.TryGetProperty("fixSenderSubId", out prop))
+                    cfg.FixSenderSubID = prop.GetString() ?? cfg.FixSenderSubID;
+
+                if (root.TryGetProperty("fixTargetSubId", out prop))
+                    cfg.FixTargetSubID = prop.GetString() ?? cfg.FixTargetSubID;
+
+                if (root.TryGetProperty("fixHeartBtInt", out prop))
+                    cfg.FixHeartBtInt = prop.GetInt32();
             }
             catch (Exception ex)
             {
@@ -79,6 +110,13 @@ public sealed class BridgeConfig
         cfg.T4Port      = int.TryParse(Env("T4_PORT"), out int p) ? p : cfg.T4Port;
         cfg.T4Username  = Env("T4_USERNAME")        ?? cfg.T4Username;
         cfg.PipeName    = Env("BRIDGE_PIPE_NAME")   ?? cfg.PipeName;
+
+        // FIX session identifier overrides
+        cfg.FixSenderCompID = Env("FIX_SENDER_COMP_ID") ?? cfg.FixSenderCompID;
+        cfg.FixTargetCompID = Env("FIX_TARGET_COMP_ID") ?? cfg.FixTargetCompID;
+        cfg.FixSenderSubID  = Env("FIX_SENDER_SUB_ID")  ?? cfg.FixSenderSubID;
+        cfg.FixTargetSubID  = Env("FIX_TARGET_SUB_ID")  ?? cfg.FixTargetSubID;
+        cfg.FixHeartBtInt   = int.TryParse(Env("FIX_HEART_BT_INT"), out int hb) ? hb : cfg.FixHeartBtInt;
 
         // 3. Secrets only from env vars
         cfg.T4Password   = Env("T4_PASSWORD");

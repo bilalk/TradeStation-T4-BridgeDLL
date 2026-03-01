@@ -14,6 +14,7 @@ public static class ConnectorFactory
         cfg.Connector.ToUpperInvariant() switch
         {
             "REAL" => new RealT4Connector(),
+            "FIX"  => new FixT4Connector(),
             _      => new StubT4Connector()
         };
 }
