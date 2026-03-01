@@ -135,7 +135,8 @@ Or after publishing:
 | Value | Behaviour |
 |-------|-----------|
 | `STUB` (default) | Returns canned "OK …" responses; no network calls. Safe for CI and development. |
-| `REAL` | Connects to the T4 simulator. Requires SDK and credentials (see below). |
+| `REAL` | Connects to the T4 simulator via the CTS.T4API SDK. Requires SDK and credentials (see below). |
+| `FIX`  | Connects to the T4 simulator via FIX 4.2 over TLS. No extra NuGet package needed. |
 
 Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.json`.
 
@@ -162,6 +163,63 @@ Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.
 
 > If you request `REAL` but did not build with `/p:T4SDK=true`, the connector returns  
 > `ERROR REAL connector not available in this build …` immediately. This is intentional fail-fast behaviour.
+
+---
+
+## FIX 4.2 Connector
+
+`FixT4Connector` connects to the T4 FIX endpoint using raw FIX 4.2 over TLS 1.2+.
+It requires **no extra NuGet packages** – only standard .NET 8 APIs (SslStream).
+
+### Protocol details
+
+- Endpoint: `uhfix-sim.t4login.com:10443` (simulator)
+- Protocol: FIX 4.2 over TLS 1.2+
+- Supported messages: Logon (35=A), Logout (35=5), Heartbeat (35=0), TestRequest (35=1)
+- **Never** sends unsupported types such as SecurityListRequest (35=x)
+
+### Session identifiers
+
+The FIX session uses the following identifiers (T4 simulator defaults):
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `FixSenderCompID` | _(T4Username value)_ | Our CompID sent to the server. |
+| `FixTargetCompID` | `CTS` | Server's CompID. |
+| `FixSenderSubID` | _(empty)_ | Our SubID (usually empty). |
+| `FixTargetSubID` | `T4FIX` | Server's SubID. |
+| `FixHeartBtInt` | `30` | Heartbeat interval in seconds. |
+
+### Configuring the FIX connector locally
+
+1. Copy `config/bridge.example.json` → `config/bridge.json`.
+2. Set `"connector": "FIX"` (or use the env var).
+3. Set credentials via environment variables:
+
+```powershell
+$env:BRIDGE_CONNECTOR   = "FIX"
+$env:T4_USERNAME        = "your-sim-username"   # also becomes SenderCompID by default
+$env:T4_PASSWORD        = "your-sim-password"
+$env:T4_LICENSE_KEY     = "your-license-key"    # optional
+
+# Override FIX session identifiers if needed (optional)
+$env:FIX_SENDER_COMP_ID = "SuperBridge"         # if different from username
+$env:FIX_TARGET_COMP_ID = "CTS"
+$env:FIX_TARGET_SUB_ID  = "T4FIX"
+```
+
+4. Run the smoke test:
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+### Building (no extra flags needed)
+
+The FIX connector is always compiled – it uses only built-in .NET 8 APIs:
+
+```powershell
+dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release
+```
 
 ---
 
@@ -198,26 +256,28 @@ The script exits with code `0` on success and non-zero on failure.
 
 ## GitHub Actions CI
 
+### `windows-ci.yml` (automatic)
+
 The workflow `.github/workflows/windows-ci.yml` automatically:
 
 1. Checks out the repository.
 2. Builds the C++ solution via `scripts/build-windows.ps1`.
 3. Builds `BridgeDotNetWorker` with `dotnet build` (default/stub mode, no T4.Api needed).
 4. Runs `BridgeCoreTests.exe` and fails the workflow if any test fails.
-5. Uploads artifacts: `BridgeDLL.dll`, the .NET worker binaries, docs, example config, and log files.
+5. Runs a smoke test with the **stub connector** (no credentials required).
+6. Uploads artifacts: `BridgeDLL.dll`, the .NET worker binaries, docs, example config, and log files.
 
-### Secrets-gated T4 Smoke Test
+#### Secrets-gated real-T4 smoke test
 
 When the repository secret `BRIDGE_T4_USER` is set, the workflow also:
 
-6. Builds `BridgeDotNetWorker` with `/p:T4SDK=true` (enables the real T4 connector).
-7. Runs `scripts/smoke-test.ps1 -T4SDK` against the T4 simulator.
+7. Builds `BridgeDotNetWorker` with `/p:T4SDK=true` (enables the real T4 connector).
+8. Runs `scripts/smoke-test.ps1 -T4SDK -RequireConnect` against the T4 simulator.
 
 The following repository secrets control this step:
 
 | Secret | Maps to env var | Description |
 |--------|-----------------|-------------|
-| `BRIDGE_CONNECTOR` | `BRIDGE_CONNECTOR` | Connector type (`REAL`) |
 | `BRIDGE_T4_HOST` | `T4_HOST` | T4 simulator hostname |
 | `BRIDGE_T4_PORT` | `T4_PORT` | T4 simulator port |
 | `BRIDGE_T4_USER` | `T4_USERNAME` | T4 simulator username |
@@ -226,3 +286,31 @@ The following repository secrets control this step:
 
 If `BRIDGE_T4_USER` is not set (e.g. on forks), the smoke-test step is skipped and
 the rest of the workflow remains green.
+
+---
+
+### `t4-fix-integration.yml` (manual)
+
+The workflow `.github/workflows/t4-fix-integration.yml` runs a **real FIX 4.2 login** against
+the T4 simulator. It is triggered **manually only** via `workflow_dispatch`.
+
+#### How to run
+
+1. Go to **Actions → t4-fix-integration → Run workflow** in the GitHub UI.
+2. Set `require_connect` to `true` (default) to fail the job if login is rejected.
+3. Click **Run workflow**.
+
+#### Required secrets
+
+| Secret | Maps to env var | Description |
+|--------|-----------------|-------------|
+| `BRIDGE_T4_HOST` | `T4_HOST` | T4 FIX endpoint hostname (default: `uhfix-sim.t4login.com`) |
+| `BRIDGE_T4_PORT` | `T4_PORT` | T4 FIX endpoint port (default: `10443`) |
+| `BRIDGE_T4_USER` | `T4_USERNAME` | T4 account / SenderCompID |
+| `BRIDGE_T4_PASSWORD` | `T4_PASSWORD` | T4 password (masked in logs) |
+| `BRIDGE_T4_LICENSE` | `T4_LICENSE_KEY` | T4 license key (masked in logs) |
+| `FIX_SENDER_COMP_ID` | `FIX_SENDER_COMP_ID` | FIX SenderCompID (optional; falls back to `T4_USERNAME`) |
+| `FIX_TARGET_COMP_ID` | `FIX_TARGET_COMP_ID` | FIX TargetCompID (optional; default `CTS`) |
+| `FIX_TARGET_SUB_ID` | `FIX_TARGET_SUB_ID` | FIX TargetSubID (optional; default `T4FIX`) |
+
+The FIX connector is always available (no T4SDK flag needed).

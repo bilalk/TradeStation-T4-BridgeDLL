@@ -1,0 +1,55 @@
+name: t4-fix-integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_connect:
+        description: "Fail if FIX connect/login fails (true/false)"
+        required: false
+        default: "true"
+
+jobs:
+  fix-integration-test:
+    runs-on: windows-2022
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build .NET worker
+        shell: pwsh
+        run: |
+          dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw ".NET worker build failed with exit code $LASTEXITCODE" }
+
+      - name: Run FIX integration smoke test
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          BRIDGE_CONNECTOR:   FIX
+          T4_HOST:            ${{ secrets.BRIDGE_T4_HOST }}
+          T4_PORT:            ${{ secrets.BRIDGE_T4_PORT }}
+          T4_USERNAME:        ${{ secrets.BRIDGE_T4_USER }}
+          T4_PASSWORD:        ${{ secrets.BRIDGE_T4_PASSWORD }}
+          T4_LICENSE_KEY:     ${{ secrets.BRIDGE_T4_LICENSE }}
+          T4_FIRM:            ${{ secrets.BRIDGE_T4_FIRM }}
+          FIX_SENDER_COMP_ID: ${{ secrets.FIX_SENDER_COMP_ID }}
+          FIX_TARGET_COMP_ID: ${{ secrets.FIX_TARGET_COMP_ID }}
+          FIX_TARGET_SUB_ID:  ${{ secrets.FIX_TARGET_SUB_ID }}
+        run: |
+          $requireConnect = '${{ github.event.inputs.require_connect }}' -ne 'false'
+          if ($requireConnect) {
+            .\scripts\smoke-test.ps1 -RequireConnect
+          } else {
+            .\scripts\smoke-test.ps1
+          }
+          if ($LASTEXITCODE -ne 0) { throw "FIX integration smoke test failed with exit code $LASTEXITCODE" }
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fix-integration-logs
+          path: logs/
