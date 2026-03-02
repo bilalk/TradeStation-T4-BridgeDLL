@@ -91,7 +91,7 @@ Copy `config/bridge.example.json` to `config/bridge.json` and edit as needed
 - **adapterType**: `MOCK` (default), `FIX` (stub, not yet implemented), `DOTNET` (stub, not yet implemented).
 - **logFilePath**: Path to the log file. The directory is created automatically.
 - **logToConsole**: Set to `true` to also print log lines to stdout.
-- **connector**: `STUB` (default) or `REAL` (see below). Can also be set via `BRIDGE_CONNECTOR` env var.
+- **connector**: `STUB` (CI/dev, default), `FIX` (recommended for real T4), or `REAL` (deprecated). Can also be set via `BRIDGE_CONNECTOR` env var.
 - **t4Host / t4Port**: T4 simulator endpoint. Defaults: `uhfix-sim.t4login.com:10443`.
 - **t4Username**: Your T4 simulator username. Can also be set via `T4_USERNAME` env var.
 - **pipeName**: Named pipe the worker listens on. Can also be set via `BRIDGE_PIPE_NAME` env var.
@@ -135,33 +135,33 @@ Or after publishing:
 | Value | Behaviour |
 |-------|-----------|
 | `STUB` (default) | Returns canned "OK …" responses; no network calls. Safe for CI and development. |
-| `REAL` | Connects to the T4 simulator. Requires SDK and credentials (see below). |
+| `FIX` | Connects to T4 via native FIX 4.2 over TLS. **Recommended** for real T4 connectivity. No NuGet dependency. |
+| `REAL` | Connects via CTS.T4API NuGet package. **Deprecated/unsupported** — use `FIX` instead. |
 
 Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.json`.
 
-### Enabling the Real T4 Connector
+### Enabling the FIX Connector (Recommended)
 
-1. Obtain the **T4.Api** NuGet package from CTS Futures.  
-   Add it to the project or drop it in a local NuGet feed.
+The FIX 4.2 connector (`FixT4Connector.cs`) uses native .NET `TcpClient` + `SslStream` — no NuGet dependency required.
 
-2. Build with the `T4SDK` property:
+1. Set credentials via environment variables (never in config files):
    ```powershell
-   dotnet build dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj -c Release /p:T4SDK=true
-   ```
-   This enables the `REAL_T4_SDK` compile-time constant and references `T4.Api`.
-
-3. Set credentials via environment variables (never in config files):
-   ```powershell
-   $env:BRIDGE_CONNECTOR = "REAL"
+   $env:BRIDGE_CONNECTOR = "FIX"
    $env:T4_USERNAME      = "your-sim-username"
    $env:T4_PASSWORD      = "your-sim-password"
-   $env:T4_LICENSE_KEY   = "your-license-key"   # if required
+   $env:T4_LICENSE_KEY   = "your-license-key"
    ```
 
-4. Run the smoke test (see below).
+2. Run the smoke test (see below).
 
-> If you request `REAL` but did not build with `/p:T4SDK=true`, the connector returns  
-> `ERROR REAL connector not available in this build …` immediately. This is intentional fail-fast behaviour.
+See the [T4 FIX API documentation](https://docs.t4login.com/doku.php?id=developers:fixapi:start) for protocol details.
+
+### Enabling the Real T4 Connector (Deprecated)
+
+> **⚠️ Deprecated** — The `REAL` connector (CTS.T4API NuGet) is no longer supported.
+> Use `FIX` for real T4 connectivity instead.
+
+
 
 ---
 
@@ -204,25 +204,8 @@ The workflow `.github/workflows/windows-ci.yml` automatically:
 2. Builds the C++ solution via `scripts/build-windows.ps1`.
 3. Builds `BridgeDotNetWorker` with `dotnet build` (default/stub mode, no T4.Api needed).
 4. Runs `BridgeCoreTests.exe` and fails the workflow if any test fails.
-5. Uploads artifacts: `BridgeDLL.dll`, the .NET worker binaries, docs, example config, and log files.
+5. Runs the smoke test with the STUB connector.
+6. Uploads artifacts: `BridgeDLL.dll`, the .NET worker binaries, docs, example config, and log files.
 
-### Secrets-gated T4 Smoke Test
-
-When the repository secret `BRIDGE_T4_USER` is set, the workflow also:
-
-6. Builds `BridgeDotNetWorker` with `/p:T4SDK=true` (enables the real T4 connector).
-7. Runs `scripts/smoke-test.ps1 -T4SDK` against the T4 simulator.
-
-The following repository secrets control this step:
-
-| Secret | Maps to env var | Description |
-|--------|-----------------|-------------|
-| `BRIDGE_CONNECTOR` | `BRIDGE_CONNECTOR` | Connector type (`REAL`) |
-| `BRIDGE_T4_HOST` | `T4_HOST` | T4 simulator hostname |
-| `BRIDGE_T4_PORT` | `T4_PORT` | T4 simulator port |
-| `BRIDGE_T4_USER` | `T4_USERNAME` | T4 simulator username |
-| `BRIDGE_T4_PASSWORD` | `T4_PASSWORD` | T4 simulator password (masked in logs) |
-| `BRIDGE_T4_LICENSE` | `T4_LICENSE_KEY` | T4 license key (masked in logs) |
-
-If `BRIDGE_T4_USER` is not set (e.g. on forks), the smoke-test step is skipped and
-the rest of the workflow remains green.
+The FIX connector (`BRIDGE_CONNECTOR=FIX`) is the recommended path for real T4 connectivity
+and can be tested manually or via a separate workflow with real credentials.
