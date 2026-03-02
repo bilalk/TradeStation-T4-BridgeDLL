@@ -39,6 +39,14 @@
 
 .PARAMETER ConnectRetryDelayMs
     Delay between pipe connect attempts, in milliseconds. Defaults to 2000.
+
+.PARAMETER WriteTimeoutSec
+    Seconds to wait for a single pipe write to complete before treating it as a timeout error.
+    Defaults to 10.
+
+.PARAMETER OverallTimeoutSec
+    Hard overall timeout in seconds for the pipe-connect-and-communicate phase (excludes build).
+    Defaults to 120.
 #>
 
 [CmdletBinding()]
@@ -51,10 +59,15 @@ param(
     [int]$ReadTimeoutSec         = 10,
     [int]$ConnectTimeoutMs       = 1000,
     [int]$MaxConnectRetries      = 10,
-    [int]$ConnectRetryDelayMs    = 2000
+    [int]$ConnectRetryDelayMs    = 2000,
+    [int]$WriteTimeoutSec        = 10,
+    [int]$OverallTimeoutSec      = 120
 )
 
 $ErrorActionPreference = "Stop"
+$sw           = [System.Diagnostics.Stopwatch]::StartNew()
+$workerStdout = $null   # set below; initialised here so finally-block cleanup is always safe
+$workerStderr = $null
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 $proj     = Join-Path $repoRoot "dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj"
 $publishDir = Join-Path $repoRoot "dotnet\BridgeDotNetWorker\bin\Release\net8.0"
@@ -92,14 +105,22 @@ if ($ConfigPath -ne "") {
     $launchArgs += $ConfigPath
 }
 
+# Redirect worker output to temp files so we can dump them on failure for diagnostics.
+$workerStdout = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "smoke-worker-out-$PID.txt")
+$workerStderr = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "smoke-worker-err-$PID.txt")
+
 if (Test-Path $workerExe) {
     $workerProc = Start-Process -FilePath $workerExe `
         -ArgumentList $launchArgs `
-        -PassThru -NoNewWindow
+        -PassThru -NoNewWindow `
+        -RedirectStandardOutput $workerStdout `
+        -RedirectStandardError  $workerStderr
 } else {
     $workerProc = Start-Process -FilePath $dotnet `
         -ArgumentList (@($workerDll) + $launchArgs) `
-        -PassThru -NoNewWindow
+        -PassThru -NoNewWindow `
+        -RedirectStandardOutput $workerStdout `
+        -RedirectStandardError  $workerStderr
 }
 
 # Give the worker a moment to start
@@ -111,10 +132,10 @@ if ($workerProc.HasExited) {
 }
 Write-Host "      Worker started (PID $($workerProc.Id))." -ForegroundColor Green
 
-$failed = $false
-$pipe = $null
-$reader = $null
-$writer = $null
+$failed     = $false
+$pipeBroken = $false
+$pipe       = $null
+$reader     = $null
 
 try {
     # ── 3. Connect pipe & send commands ──────────────────────────────────────
@@ -137,7 +158,7 @@ try {
             ".",                # server name (local)
             $PipeName,
             [System.IO.Pipes.PipeDirection]::InOut,
-            [System.IO.Pipes.PipeOptions]::None
+            [System.IO.Pipes.PipeOptions]::Asynchronous
         )
 
         try {
@@ -161,25 +182,54 @@ try {
     }
 
     $reader = [System.IO.StreamReader]::new($pipe, [System.Text.Encoding]::UTF8)
-    $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.Encoding]::UTF8)
-    $writer.AutoFlush = $true
 
     function Send-Command([string]$cmd) {
-        Write-Host "  >> $cmd"
-        $writer.WriteLine($cmd)
-
-        $task = $reader.ReadLineAsync()
-        try {
-            if (-not $task.Wait([System.TimeSpan]::FromSeconds($ReadTimeoutSec))) {
-                Write-Host ("  << (no response after {0}s)" -f $ReadTimeoutSec) -ForegroundColor Red
-                return $null
-            }
-        } catch {
-            Write-Host "  << (read error: $_)" -ForegroundColor Red
+        # Bail out fast if the pipe is already known-broken or overall timeout exceeded.
+        if ($script:pipeBroken) {
+            Write-Host ("  (skipping '{0}': pipe broken)" -f $cmd) -ForegroundColor Yellow
+            return $null
+        }
+        if ($sw.Elapsed.TotalSeconds -gt $OverallTimeoutSec) {
+            Write-Host ("  (skipping '{0}': overall timeout {1}s exceeded; elapsed {2:F0}s)" -f $cmd, $OverallTimeoutSec, $sw.Elapsed.TotalSeconds) -ForegroundColor Yellow
+            $script:failed = $true
             return $null
         }
 
-        $resp = $task.Result
+        Write-Host "  >> $cmd"
+
+        # Write command to pipe using async I/O with a hard timeout.
+        # Avoids the blocking StreamWriter.WriteLine() which can deadlock on CI.
+        $bytes     = [System.Text.Encoding]::UTF8.GetBytes($cmd + "`r`n")
+        $writeTask = $pipe.WriteAsync($bytes, 0, $bytes.Length)
+        if (-not $writeTask.Wait($WriteTimeoutSec * 1000)) {
+            Write-Host ("  >> write timed out after {0}s; worker HasExited={1}" -f $WriteTimeoutSec, $workerProc.HasExited) -ForegroundColor Red
+            $script:pipeBroken = $true
+            return $null
+        }
+        if ($writeTask.IsFaulted) {
+            Write-Host ("  >> write error: {0}" -f $writeTask.Exception.GetBaseException().Message) -ForegroundColor Red
+            $script:pipeBroken = $true
+            return $null
+        }
+        Write-Host "  >> (sent, awaiting response)"
+
+        # Read response with timeout.  We track whether a read task is outstanding so we
+        # never call ReadLineAsync() a second time while a previous call is still pending
+        # (doing so causes an undefined-behaviour deadlock in StreamReader).
+        $readTask = $reader.ReadLineAsync()
+        try {
+            if (-not $readTask.Wait([System.TimeSpan]::FromSeconds($ReadTimeoutSec))) {
+                Write-Host ("  << no response after {0}s; worker HasExited={1}" -f $ReadTimeoutSec, $workerProc.HasExited) -ForegroundColor Red
+                $script:pipeBroken = $true
+                return $null
+            }
+        } catch {
+            Write-Host ("  << read error: {0}" -f $_) -ForegroundColor Red
+            $script:pipeBroken = $true
+            return $null
+        }
+
+        $resp = $readTask.Result
         Write-Host "  << $resp"
         return $resp
     }
@@ -225,19 +275,58 @@ try {
 
 } finally {
     # dispose pipe objects
-    try { if ($writer) { $writer.Dispose() } } catch { }
     try { if ($reader) { $reader.Dispose() } } catch { }
-    try { if ($pipe) { $pipe.Dispose() } } catch { }
+    try { if ($pipe)   { $pipe.Dispose()   } } catch { }
 
     # ── 4. Tear down worker ───────────────────────────────────────────────────
     try {
-        if (-not $workerProc.HasExited) {
+        if ($workerProc -and -not $workerProc.HasExited) {
             $workerProc.WaitForExit(3000) | Out-Null
             if (-not $workerProc.HasExited) {
                 $workerProc.Kill()
             }
         }
     } catch { }
+
+    # ── 5. Diagnostics on failure / timeout ───────────────────────────────────
+    if ($failed -or $pipeBroken) {
+        Write-Host ""
+        Write-Host "=== FAILURE DIAGNOSTICS ===" -ForegroundColor Cyan
+        $elapsed = [int]$sw.Elapsed.TotalSeconds
+        Write-Host ("  Elapsed  : {0}s (limit {1}s)" -f $elapsed, $OverallTimeoutSec)
+        if ($workerProc) {
+            $exitInfo = if ($workerProc.HasExited) { "exited (code $($workerProc.ExitCode))" } else { "still running" }
+            Write-Host ("  Worker   : PID {0} — {1}" -f $workerProc.Id, $exitInfo)
+        }
+        foreach ($entry in @(
+            @{ File = $workerStdout; Label = "worker stdout" },
+            @{ File = $workerStderr; Label = "worker stderr" }
+        )) {
+            if ($entry.File -and (Test-Path $entry.File -ErrorAction SilentlyContinue)) {
+                $lines = Get-Content $entry.File -ErrorAction SilentlyContinue | Select-Object -Last 30
+                if ($lines) {
+                    Write-Host ""
+                    Write-Host ("--- {0} (last 30 lines) ---" -f $entry.Label)
+                    $lines | ForEach-Object { Write-Host "  $_" }
+                }
+            }
+        }
+        $logsDir = Join-Path $repoRoot "logs"
+        if (Test-Path $logsDir) {
+            Write-Host ""
+            Write-Host "--- logs/ ---"
+            Get-ChildItem $logsDir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "  $($_.Name):"
+                Get-Content $_.FullName -ErrorAction SilentlyContinue |
+                    Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" }
+            }
+        }
+    }
+
+    # Clean up temp log files
+    foreach ($f in @($workerStdout, $workerStderr)) {
+        try { if ($f) { Remove-Item $f -Force -ErrorAction SilentlyContinue } } catch { }
+    }
 }
 
 if ($failed) {
