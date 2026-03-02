@@ -52,11 +52,28 @@ jobs:
           }
 
       - name: Smoke test (stub connector)
-        timeout-minutes: 5
+        timeout-minutes: 2
         shell: pwsh
+        env:
+          BRIDGE_CONNECTOR: STUB
         run: |
-          .\scripts\smoke-test.ps1
+          .\scripts\smoke-test.ps1 -ReadTimeoutSec 15 -ConnectTimeoutMs 2000 -MaxConnectRetries 5 -ConnectRetryDelayMs 1000
           if ($LASTEXITCODE -ne 0) { throw "Smoke test (stub) failed with exit code $LASTEXITCODE" }
+
+      - name: Smoke test (FIX connector - T4 simulator)
+        if: ${{ secrets.BRIDGE_T4_USER != '' }}
+        timeout-minutes: 2
+        shell: pwsh
+        env:
+          BRIDGE_CONNECTOR:  FIX
+          T4_USERNAME:       ${{ secrets.BRIDGE_T4_USER }}
+          T4_PASSWORD:       ${{ secrets.BRIDGE_T4_PASSWORD }}
+          T4_LICENSE_KEY:    ${{ secrets.BRIDGE_T4_LICENSE }}
+          T4_HOST:           ${{ secrets.BRIDGE_T4_HOST }}
+          T4_PORT:           ${{ secrets.BRIDGE_T4_PORT }}
+        run: |
+          .\scripts\smoke-test.ps1 -RequireConnect -ReadTimeoutSec 20 -ConnectTimeoutMs 3000 -MaxConnectRetries 5 -ConnectRetryDelayMs 2000
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test (FIX) failed with exit code $LASTEXITCODE" }
 
       - name: Upload artifacts
         if: always()
@@ -75,4 +92,3 @@ jobs:
             docs/
             config/bridge.example.json
             logs/
-
