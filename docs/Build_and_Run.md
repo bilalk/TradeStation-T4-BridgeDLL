@@ -135,9 +135,33 @@ Or after publishing:
 | Value | Behaviour |
 |-------|-----------|
 | `STUB` (default) | Returns canned "OK …" responses; no network calls. Safe for CI and development. |
-| `REAL` | Connects to the T4 simulator. Requires SDK and credentials (see below). |
+| `REAL` | Connects to the T4 simulator via the CTS.T4API SDK. Requires SDK and credentials (see below). |
+| `FIX`  | Connects to the T4 simulator using native FIX 4.2 over TLS. No extra SDK needed. |
 
 Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.json`.
+
+### Enabling the FIX 4.2 Connector
+
+The `FIX` connector uses a native FIX 4.2 implementation over TLS — no extra NuGet package is required.
+
+```powershell
+$env:BRIDGE_CONNECTOR = "FIX"
+$env:T4_USERNAME      = "your-sim-username"
+$env:T4_PASSWORD      = "your-sim-password"
+$env:T4_LICENSE_KEY   = "your-license-key"
+.\scripts\smoke-test.ps1 -RequireConnect
+```
+
+The connector sends a FIX 4.2 Logon (`35=A`) with Tag 91 (RawData = license key) to
+`uhfix-sim.t4login.com:10443` over TLS 1.2+. Expected console output:
+
+```
+[FixT4Connector] Connecting to uhfix-sim.t4login.com:10443…
+[FixT4Connector] TLS handshake complete
+[FixT4Connector] Sending Logon (35=A) with Tag 91 (License)…
+[FixT4Connector] Received Logon response (35=A) - Session accepted
+[FixT4Connector] Connected successfully
+```
 
 ### Enabling the Real T4 Connector
 
@@ -162,6 +186,16 @@ Set via `BRIDGE_CONNECTOR` env var **or** the `connector` key in `config/bridge.
 
 > If you request `REAL` but did not build with `/p:T4SDK=true`, the connector returns  
 > `ERROR REAL connector not available in this build …` immediately. This is intentional fail-fast behaviour.
+
+### Debug Response Log
+
+All command responses are appended to `logs/bridge_responses.log` by the worker, in the format:
+
+```
+[2026-03-02T12:00:00Z] PLACE ESH26 BUY 1 MARKET -> OK order submitted: 12345
+```
+
+The file is rotated on startup if it exceeds 1 000 lines (oldest half discarded).
 
 ---
 

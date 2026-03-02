@@ -14,4 +14,7 @@ public interface IT4Connector
 
     /// <summary>Places an order. Returns "OK &lt;orderId&gt;" or "ERROR ...".</summary>
     string PlaceOrder(string symbol, string side, int quantity, decimal price, string orderType);
+
+    /// <summary>Cancels all resting orders for the given symbol/account. Returns "OK ..." or "ERROR ...".</summary>
+    string CancelOrders(string symbol, string account);
 }
