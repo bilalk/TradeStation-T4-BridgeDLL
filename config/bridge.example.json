@@ -16,7 +16,7 @@
 
   "_comment_dotnet_worker": "Settings for the optional BridgeDotNetWorker process (see docs/Build_and_Run.md)",
   "connector": "STUB",
-  "_comment_connector": "STUB (default, no credentials needed) | REAL (requires T4.Api NuGet + /p:T4SDK=true)",
+  "_comment_connector": "STUB (CI/dev) | FIX (recommended for T4) | REAL (deprecated, requires CTS.T4API)",
   "t4Host": "uhfix-sim.t4login.com",
   "t4Port": 10443,
   "t4Username": "YOUR_SIMULATOR_USERNAME",

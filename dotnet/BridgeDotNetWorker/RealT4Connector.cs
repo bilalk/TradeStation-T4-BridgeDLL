@@ -7,6 +7,7 @@ namespace BridgeDotNetWorker;
 /// </summary>
 public sealed class RealT4Connector : IT4Connector
 {
+#if false // DISABLED: Use FixT4Connector instead. See docs/Build_and_Run.md
 #if REAL_T4_SDK
     // ---------------------------------------------------------------------------
     // NOTE: The T4.API namespace below refers to the CTS Futures CTS.T4API NuGet package.
@@ -103,5 +104,6 @@ public sealed class RealT4Connector : IT4Connector
     public string Ping()                                                             => SdkNotAvailable;
     public string Connect(BridgeConfig cfg)                                          => SdkNotAvailable;
     public string PlaceOrder(string s, string sd, int q, decimal p, string ot)      => SdkNotAvailable;
+#endif
 #endif
 }
