@@ -13,4 +13,7 @@ public sealed class StubT4Connector : IT4Connector
 
     public string PlaceOrder(string symbol, string side, int quantity, decimal price, string orderType) =>
         $"OK stub order placed: {symbol} {side} {quantity}@{price} type={orderType}";
+
+    public string CancelOrders(string symbol, string account) =>
+        $"OK stub cancelled all resting orders: {symbol}" + (string.IsNullOrEmpty(account) ? "" : $" account={account}");
 }

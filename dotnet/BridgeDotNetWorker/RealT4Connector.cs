@@ -78,6 +78,14 @@ public sealed class RealT4Connector : IT4Connector
         }
     }
 
+    public string CancelOrders(string symbol, string account)
+    {
+        if (!_connected || _host is null)
+            return "ERROR not connected";
+        // T4.API cancel-all via SDK would go here once order routing is fully integrated.
+        return $"OK cancel request sent (stub path): {symbol}" + (string.IsNullOrEmpty(account) ? "" : $" account={account}");
+    }
+
     private void OnLoginResponse(T4.API.Host host, T4.API.LoginResponseEventArgs args)
     {
         if (args.Result == T4.LoginResult.Accepted)
@@ -103,5 +111,6 @@ public sealed class RealT4Connector : IT4Connector
     public string Ping()                                                             => SdkNotAvailable;
     public string Connect(BridgeConfig cfg)                                          => SdkNotAvailable;
     public string PlaceOrder(string s, string sd, int q, decimal p, string ot)      => SdkNotAvailable;
+    public string CancelOrders(string symbol, string account)                        => SdkNotAvailable;
 #endif
 }

@@ -3,12 +3,17 @@ using System.Text;
 
 namespace BridgeDotNetWorker;
 
+// UTF-8 encoding without BOM preamble – used on both server and client sides to
+// avoid the 3-byte BOM that Encoding.UTF8 writes at the start of each stream.
+file static class NoBomUtf8 { internal static readonly UTF8Encoding Encoding = new(encoderShouldEmitUTF8Identifier: false); }
+
 /// <summary>
 /// Named-pipe IPC server.  Accepts line-delimited text commands from a local client:
 /// <list type="bullet">
 ///   <item><term>PING</term><description>Returns "OK PONG"</description></item>
 ///   <item><term>CONNECT</term><description>Connects to T4 using loaded config. Returns "OK ..." or "ERROR ..."</description></item>
 ///   <item><term>PLACE symbol side qty price [type]</term><description>Places an order. Returns "OK ..." or "ERROR ..."</description></item>
+///   <item><term>CANCEL symbol [account]</term><description>Cancels all resting orders for the symbol. Returns "OK ..." or "ERROR ..."</description></item>
 ///   <item><term>EXIT</term><description>Shuts down the server.</description></item>
 /// </list>
 /// </summary>
@@ -61,16 +66,31 @@ public sealed class PipeServer : IDisposable
 
     private async Task HandleClientAsync(NamedPipeServerStream pipe, CancellationToken token)
     {
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        using var writer = new StreamWriter(pipe, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+        using var reader = new StreamReader(pipe, NoBomUtf8.Encoding, leaveOpen: true);
+        using var writer = new StreamWriter(pipe, NoBomUtf8.Encoding, leaveOpen: true);
 
         while (!token.IsCancellationRequested && pipe.IsConnected)
         {
-            string? line = await reader.ReadLineAsync(token);
+            string? line;
+            using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            idleCts.CancelAfter(TimeSpan.FromSeconds(60));
+
+            try
+            {
+                line = await reader.ReadLineAsync(idleCts.Token);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                Console.WriteLine("[PipeServer] Client idle timeout (60s). Closing connection.");
+                break;
+            }
+
             if (line is null) break;  // client disconnected
 
             string response = ProcessCommand(line.Trim());
+            ResponseLogger.Log(line.Trim(), response);
             await writer.WriteLineAsync(response.AsMemory(), token);
+            await writer.FlushAsync(token);
 
             if (line.Trim().Equals("EXIT", StringComparison.OrdinalIgnoreCase))
             {
@@ -95,6 +115,7 @@ public sealed class PipeServer : IDisposable
                 "PING"    => _connector.Ping(),
                 "CONNECT" => _connector.Connect(_cfg),
                 "PLACE"   => HandlePlace(parts),
+                "CANCEL"  => HandleCancel(parts),
                 "EXIT"    => "OK bye",
                 _         => $"ERROR unknown command '{verb}'"
             };
@@ -121,6 +142,17 @@ public sealed class PipeServer : IDisposable
         string orderType = parts.Length >= 6 ? parts[5] : "LIMIT";
 
         return _connector.PlaceOrder(symbol, side, qty, price, orderType);
+    }
+
+    private string HandleCancel(string[] parts)
+    {
+        // CANCEL <symbol> [account]
+        if (parts.Length < 2)
+            return "ERROR usage: CANCEL <symbol> [account]";
+
+        string symbol  = parts[1];
+        string account = parts.Length >= 3 ? parts[2] : string.Empty;
+        return _connector.CancelOrders(symbol, account);
     }
 
     public void Dispose()

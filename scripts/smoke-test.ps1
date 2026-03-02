@@ -59,6 +59,12 @@ $repoRoot = Resolve-Path "$PSScriptRoot\.."
 $proj     = Join-Path $repoRoot "dotnet\BridgeDotNetWorker\BridgeDotNetWorker.csproj"
 $publishDir = Join-Path $repoRoot "dotnet\BridgeDotNetWorker\bin\Release\net8.0"
 
+# Ensure logs directory exists before starting worker
+$logsDir = Join-Path $repoRoot "logs"
+if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
+$workerStdoutLog = Join-Path $logsDir "worker-stdout.txt"
+$workerStderrLog = Join-Path $logsDir "worker-stderr.txt"
+
 Write-Host "=== Smoke Test ===" -ForegroundColor Cyan
 
 # ── 1. Build ──────────────────────────────────────────────────────────────────
@@ -95,11 +101,15 @@ if ($ConfigPath -ne "") {
 if (Test-Path $workerExe) {
     $workerProc = Start-Process -FilePath $workerExe `
         -ArgumentList $launchArgs `
-        -PassThru -NoNewWindow
+        -PassThru `
+        -RedirectStandardOutput $workerStdoutLog `
+        -RedirectStandardError  $workerStderrLog
 } else {
     $workerProc = Start-Process -FilePath $dotnet `
         -ArgumentList (@($workerDll) + $launchArgs) `
-        -PassThru -NoNewWindow
+        -PassThru `
+        -RedirectStandardOutput $workerStdoutLog `
+        -RedirectStandardError  $workerStderrLog
 }
 
 # Give the worker a moment to start
@@ -160,11 +170,19 @@ try {
         return
     }
 
-    $reader = [System.IO.StreamReader]::new($pipe, [System.Text.Encoding]::UTF8)
-    $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.Encoding]::UTF8)
+    $noBomUtf8 = [System.Text.UTF8Encoding]::new($false)
+    $reader = [System.IO.StreamReader]::new($pipe, $noBomUtf8)
+    $writer = [System.IO.StreamWriter]::new($pipe, $noBomUtf8)
     $writer.AutoFlush = $true
 
+    $pipeBroken = $false
+
     function Send-Command([string]$cmd) {
+        if ($pipeBroken) {
+            Write-Host "  >> $cmd (skipped – pipe broken)" -ForegroundColor Yellow
+            return $null
+        }
+
         Write-Host "  >> $cmd"
         $writer.WriteLine($cmd)
 
@@ -172,10 +190,12 @@ try {
         try {
             if (-not $task.Wait([System.TimeSpan]::FromSeconds($ReadTimeoutSec))) {
                 Write-Host ("  << (no response after {0}s)" -f $ReadTimeoutSec) -ForegroundColor Red
+                $script:pipeBroken = $true
                 return $null
             }
         } catch {
             Write-Host "  << (read error: $_)" -ForegroundColor Red
+            $script:pipeBroken = $true
             return $null
         }
 
@@ -238,6 +258,23 @@ try {
             }
         }
     } catch { }
+
+    # Dump worker output on failure for diagnostics
+    if ($failed) {
+        if (Test-Path $workerStdoutLog) {
+            Write-Host "`n=== Worker stdout ===" -ForegroundColor Yellow
+            Get-Content $workerStdoutLog | ForEach-Object { Write-Host $_ }
+        }
+        if (Test-Path $workerStderrLog) {
+            Write-Host "`n=== Worker stderr ===" -ForegroundColor Yellow
+            Get-Content $workerStderrLog | ForEach-Object { Write-Host $_ }
+        }
+        $responsesLog = Join-Path $logsDir "bridge_responses.log"
+        if (Test-Path $responsesLog) {
+            Write-Host "`n=== bridge_responses.log ===" -ForegroundColor Yellow
+            Get-Content $responsesLog | Select-Object -Last 50 | ForEach-Object { Write-Host $_ }
+        }
+    }
 }
 
 if ($failed) {
