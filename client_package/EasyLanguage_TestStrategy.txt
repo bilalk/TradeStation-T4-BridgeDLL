@@ -1,0 +1,69 @@
+{ ================================================================ }
+{ EasyLanguage_TestStrategy.txt                                    }
+{ TradeStation-T4 Bridge — Verification Strategy                   }
+{                                                                    }
+{ HOW TO USE:                                                        }
+{   1. Open TradeStation EasyLanguage Editor (F3).                  }
+{   2. Create a new Strategy.                                        }
+{   3. Replace all default code with the contents of this file.     }
+{   4. Compile (Ctrl+Alt+B).                                         }
+{   5. Apply to any chart.                                           }
+{   6. Check Print Log for the result line.                          }
+{ ================================================================ }
+
+{ Declare the DLL function.  BridgeTS.dll must be placed in:        }
+{   C:\Program Files\TradeStation 10.0\Program\                     }
+
+DefineDLLFunc: "BridgeTS.dll",
+    INT, "PLACE_ORDER",
+    LPSTR, LPSTR, LPSTR, LPSTR,
+    INT,
+    LPSTR, DOUBLE, DOUBLE, LPSTR;
+
+{ ---- Variable declarations ---- }
+vars:
+    DLLResult(0);
+
+{ ------------------------------------------------------------------ }
+{ Strategy body: fires once on the last bar of the chart.            }
+{ ------------------------------------------------------------------ }
+
+if LastBarOnChart then begin
+
+    { --- Happy-path: valid PLACE order --- }
+    DLLResult = PLACE_ORDER(
+        "PLACE",      { command     }
+        "ACC001",     { account     }
+        "ESH26",      { instrument  }
+        "BUY",        { action      }
+        1,            { quantity    }
+        "MARKET",     { orderType   }
+        0.0,          { limitPrice  }
+        0.0,          { stopPrice   }
+        "DAY"         { timeInForce }
+    );
+
+    if DLLResult = 0 then
+        Print("Order placed successfully (rc=", DLLResult:0:0, ")")
+    else
+        Print("Order FAILED, rc=", DLLResult:0:0);
+
+    { --- Negative test: zero quantity should return RC_INVALID_PARAM (-2) --- }
+    DLLResult = PLACE_ORDER(
+        "PLACE",
+        "ACC001",
+        "ESH26",
+        "BUY",
+        0,            { zero qty — expected to fail }
+        "MARKET",
+        0.0,
+        0.0,
+        "DAY"
+    );
+
+    if DLLResult = -2 then
+        Print("Validation check PASSED: zero-qty returned RC_INVALID_PARAM (", DLLResult:0:0, ")")
+    else
+        Print("Validation check FAILED: expected -2, got ", DLLResult:0:0);
+
+end;

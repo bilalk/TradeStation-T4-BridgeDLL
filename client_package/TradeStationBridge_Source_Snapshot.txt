@@ -1,0 +1,895 @@
+TradeStationBridge_Source_Snapshot.txt
+=======================================
+TradeStation-T4-BridgeDLL — Key DLL Source Files
+Purpose: Client-verifiable snapshot for non-programmer review.
+         Friendly Notepad / text-editor format.
+
+INCLUDED FILES (BridgeTS shell + BridgeCore parsing/validation/logging path):
+  1.  BridgeTS/BridgeTS.h
+  2.  BridgeTS/BridgeTS.cpp
+  3.  BridgeCore/include/Types.h
+  4.  BridgeCore/include/Parser.h
+  5.  BridgeCore/src/Parser.cpp
+  6.  BridgeCore/include/Validation.h
+  7.  BridgeCore/src/Validation.cpp
+  8.  BridgeCore/include/Logger.h
+  9.  BridgeCore/src/Logger.cpp
+  10. BridgeCore/include/BridgeEngine.h
+  11. BridgeCore/src/BridgeEngine.cpp
+
+EXPLICITLY EXCLUDED (out of scope for this deliverable):
+  - T4 FIX connector / FIX protocol implementation
+  - BridgeDotNetWorker (.NET side-car process)
+  - BridgeDLL.dll (older variant; BridgeTS.dll is the recommended DLL)
+  - DotNetAdapterStub / FixAdapterStub implementation files
+  - BridgeCoreTests / BridgeTSTests test harnesses
+  - Config.cpp / Config.h (JSON loader — defaults to MOCK automatically)
+  - MockAdapter.cpp (runs under the hood; returns RC_SUCCESS for all commands)
+
+KEY BEHAVIOUR SUMMARY:
+  - When no config/bridge.json is present, BridgeEngine defaults to the MOCK adapter.
+  - The MOCK adapter's IsConnected() returns true and Execute() returns RC_SUCCESS (0)
+    for every valid command (PLACE, CANCEL, CHANGE, etc.).
+  - All calls are logged to logs/bridge.log (relative to the DLL directory).
+  - Invalid inputs return negative error codes without any network call.
+
+===============================================================================
+
+
+================================================================================
+FILE: BridgeTS/BridgeTS.h
+================================================================================
+#pragma once
+
+#ifdef BRIDGETS_EXPORTS
+#  define BRIDGETS_API __declspec(dllexport)
+#else
+#  define BRIDGETS_API __declspec(dllimport)
+#endif
+
+extern "C" {
+
+// ANSI entry point — primary interface for TradeStation 10 EasyLanguage.
+// Called via:  DefineDLLFunc: "BridgeTS.dll", INT, "PLACE_ORDER",
+//              LPSTR, LPSTR, LPSTR, LPSTR, INT, LPSTR, DOUBLE, DOUBLE, LPSTR;
+BRIDGETS_API int __stdcall PLACE_ORDER(
+    const char* command,
+    const char* account,
+    const char* instrument,
+    const char* action,
+    int         quantity,
+    const char* orderType,
+    double      limitPrice,
+    double      stopPrice,
+    const char* timeInForce);
+
+// Unicode variant for flexibility.
+BRIDGETS_API int __stdcall PLACE_ORDER_W(
+    const wchar_t* command,
+    const wchar_t* account,
+    const wchar_t* instrument,
+    const wchar_t* action,
+    int            quantity,
+    const wchar_t* orderType,
+    double         limitPrice,
+    double         stopPrice,
+    const wchar_t* timeInForce);
+
+// ANSI named alias (matches BridgeDLL API surface).
+BRIDGETS_API int __stdcall PLACE_ORDER_A(
+    const char* command,
+    const char* account,
+    const char* instrument,
+    const char* action,
+    int         quantity,
+    const char* orderType,
+    double      limitPrice,
+    double      stopPrice,
+    const char* timeInForce);
+
+// Single pipe-delimited Unicode payload.
+BRIDGETS_API int __stdcall PLACE_ORDER_CMD_W(const wchar_t* payload);
+
+// Single pipe-delimited ANSI payload.
+BRIDGETS_API int __stdcall PLACE_ORDER_CMD_A(const char* payload);
+
+} // extern "C"
+
+
+================================================================================
+FILE: BridgeTS/BridgeTS.cpp
+================================================================================
+// BridgeTS.cpp — TradeStation-facing shell for the T4 Bridge DLL.
+// Receives calls from EasyLanguage, validates parameters, logs activity,
+// and dispatches through BridgeCore (MOCK / DOTNET / FIX adapter).
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#define BRIDGETS_EXPORTS
+#include "BridgeTS.h"
+
+#include "BridgeEngine.h"
+#include "Parser.h"
+#include "Logger.h"
+#include "Types.h"
+
+#include <string>
+#include <atomic>
+
+// ---------------------------------------------------------------------------
+// Module-level request counter (used to tag log lines with [REQ-NNNN])
+// ---------------------------------------------------------------------------
+namespace {
+
+static std::atomic<unsigned int> g_reqCounter{ 0 };
+
+// SEH wrapper — must be in its own function with NO C++ objects that need
+// unwinding (std::string etc.) to avoid MSVC error C2712.
+static int SEH_WideCharToMultiByte(UINT cp, DWORD flags, const wchar_t* w,
+                                    int cchW, char* buf, int cbBuf)
+{
+    __try {
+        return WideCharToMultiByte(cp, flags, w, cchW, buf, cbBuf, nullptr, nullptr);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+static std::string WideToUtf8(const wchar_t* w)
+{
+    if (!w) return {};
+    int len = SEH_WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0);
+    if (len <= 0) return {};
+    std::string s(static_cast<size_t>(len - 1), '\0');
+    SEH_WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), len);
+    return s;
+}
+
+// Format a request tag such as "[REQ-0001]"
+static std::string ReqTag(unsigned int id)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "[REQ-%04u]", id);
+    return buf;
+}
+
+// SEH-guarded engine execute — no C++ objects in this function.
+static int SEH_Execute(Bridge::BridgeEngine& engine, const Bridge::OrderRequest& req)
+{
+    __try {
+        return engine.Execute(req);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return Bridge::RC_INTERNAL_ERR;
+    }
+}
+
+// Core dispatch — all public entry points converge here after building req.
+static int DispatchRequest(const Bridge::OrderRequest& req, const std::string& tag)
+{
+    int rc = SEH_Execute(Bridge::GetEngine(), req);
+    if (rc == Bridge::RC_INTERNAL_ERR) {
+        Bridge::LogError(tag + " SEH exception in DispatchRequest");
+    } else {
+        Bridge::LogDebug(tag + " Execute returned rc=" + std::to_string(rc));
+    }
+    return rc;
+}
+
+} // anonymous namespace
+
+// ---------------------------------------------------------------------------
+// DllMain
+// ---------------------------------------------------------------------------
+BOOL APIENTRY DllMain(HMODULE /*hModule*/, DWORD ul_reason, LPVOID /*lpReserved*/)
+{
+    switch (ul_reason) {
+    case DLL_PROCESS_ATTACH:
+    case DLL_THREAD_ATTACH:
+    case DLL_THREAD_DETACH:
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
+}
+
+// ---------------------------------------------------------------------------
+// Exported functions
+// ---------------------------------------------------------------------------
+extern "C" {
+
+// Primary ANSI entry point — this is the function Fred wires up in EasyLanguage.
+BRIDGETS_API int __stdcall PLACE_ORDER(
+    const char* command,
+    const char* account,
+    const char* instrument,
+    const char* action,
+    int         quantity,
+    const char* orderType,
+    double      limitPrice,
+    double      stopPrice,
+    const char* timeInForce)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    // Guard against null command — return RC_INVALID_PARAM per spec.
+    if (!command) {
+        Bridge::LogWarning(tag + " PLACE_ORDER called with null command");
+        return Bridge::RC_INVALID_PARAM;
+    }
+
+    Bridge::LogInfo(tag + " PLACE_ORDER called"
+        " command=" + std::string(command ? command : "<null>") +
+        " account=" + std::string(account ? account : "<null>") +
+        " instrument=" + std::string(instrument ? instrument : "<null>") +
+        " action=" + std::string(action ? action : "<null>") +
+        " quantity=" + std::to_string(quantity) +
+        " orderType=" + std::string(orderType ? orderType : "<null>") +
+        " limitPrice=" + std::to_string(limitPrice) +
+        " stopPrice=" + std::to_string(stopPrice) +
+        " tif=" + std::string(timeInForce ? timeInForce : "<null>"));
+
+    Bridge::OrderRequest req;
+    int rc = Bridge::BuildRequest(command, account, instrument, action,
+                                  quantity, orderType, limitPrice, stopPrice,
+                                  timeInForce, req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " Validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+// Unicode variant.
+BRIDGETS_API int __stdcall PLACE_ORDER_W(
+    const wchar_t* command,
+    const wchar_t* account,
+    const wchar_t* instrument,
+    const wchar_t* action,
+    int            quantity,
+    const wchar_t* orderType,
+    double         limitPrice,
+    double         stopPrice,
+    const wchar_t* timeInForce)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    Bridge::OrderRequest req;
+    int rc = Bridge::BuildRequest(command, account, instrument, action,
+                                  quantity, orderType, limitPrice, stopPrice,
+                                  timeInForce, req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " PLACE_ORDER_W validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " PLACE_ORDER_W Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+// ANSI named alias — identical to PLACE_ORDER.
+BRIDGETS_API int __stdcall PLACE_ORDER_A(
+    const char* command,
+    const char* account,
+    const char* instrument,
+    const char* action,
+    int         quantity,
+    const char* orderType,
+    double      limitPrice,
+    double      stopPrice,
+    const char* timeInForce)
+{
+    return PLACE_ORDER(command, account, instrument, action,
+                       quantity, orderType, limitPrice, stopPrice, timeInForce);
+}
+
+// Pipe-delimited Unicode payload.
+BRIDGETS_API int __stdcall PLACE_ORDER_CMD_W(const wchar_t* payload)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    std::string narrow = WideToUtf8(payload);
+    Bridge::OrderRequest req;
+    int rc = Bridge::ParsePayload(narrow, req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " PLACE_ORDER_CMD_W parse/validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " PLACE_ORDER_CMD_W Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+// Pipe-delimited ANSI payload.
+BRIDGETS_API int __stdcall PLACE_ORDER_CMD_A(const char* payload)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    Bridge::OrderRequest req;
+    int rc = Bridge::ParsePayload(payload ? payload : "", req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " PLACE_ORDER_CMD_A parse/validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " PLACE_ORDER_CMD_A Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+} // extern "C"
+
+
+================================================================================
+FILE: BridgeCore/include/Types.h
+================================================================================
+#pragma once
+#include <string>
+
+namespace Bridge {
+
+// Return codes
+constexpr int RC_SUCCESS        =  0;
+constexpr int RC_INVALID_CMD    = -1;
+constexpr int RC_INVALID_PARAM  = -2;
+constexpr int RC_NOT_CONNECTED  = -3;
+constexpr int RC_INTERNAL_ERR   = -4;
+constexpr int RC_CONFIG_ERR     = -6;
+
+enum class Command {
+    PLACE,
+    CANCEL,
+    CANCELALLORDERS,
+    CHANGE,
+    CLOSEPOSITION,
+    CLOSESTRATEGY,
+    FLATTENEVERYTHING,
+    REVERSEPOSITION,
+    UNKNOWN
+};
+
+enum class Action {
+    BUY,
+    SELL,
+    UNKNOWN
+};
+
+enum class OrderType {
+    MARKET,
+    LIMIT,
+    STOPMARKET,
+    STOPLIMIT,
+    UNKNOWN
+};
+
+enum class TimeInForce {
+    DAY,
+    GTC,
+    UNKNOWN
+};
+
+struct OrderRequest {
+    Command     command     = Command::UNKNOWN;
+    std::string account;
+    std::string instrument;
+    Action      action      = Action::UNKNOWN;
+    int         quantity    = 0;
+    OrderType   orderType   = OrderType::UNKNOWN;
+    double      limitPrice  = 0.0;
+    double      stopPrice   = 0.0;
+    TimeInForce timeInForce = TimeInForce::UNKNOWN;
+};
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/include/Parser.h
+================================================================================
+#pragma once
+#include "Types.h"
+#include <string>
+
+namespace Bridge {
+
+// Parse pipe-delimited payload of the form:
+//   command=PLACE|account=ACC1|instrument=ES|action=BUY|quantity=1|
+//   orderType=MARKET|limitPrice=0|stopPrice=0|timeInForce=DAY
+// Returns RC_SUCCESS or a negative error code.
+int ParsePayload(const std::string& payload, OrderRequest& out) noexcept;
+
+// Build an OrderRequest from individual wide-string parameters.
+int BuildRequest(const wchar_t* command,
+                 const wchar_t* account,
+                 const wchar_t* instrument,
+                 const wchar_t* action,
+                 int            quantity,
+                 const wchar_t* orderType,
+                 double         limitPrice,
+                 double         stopPrice,
+                 const wchar_t* timeInForce,
+                 OrderRequest&  out) noexcept;
+
+// Narrow-string variant.
+int BuildRequest(const char* command,
+                 const char* account,
+                 const char* instrument,
+                 const char* action,
+                 int         quantity,
+                 const char* orderType,
+                 double      limitPrice,
+                 double      stopPrice,
+                 const char* timeInForce,
+                 OrderRequest& out) noexcept;
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/src/Parser.cpp
+================================================================================
+#include "Parser.h"
+#include "Validation.h"
+#include "Types.h"
+#include <string>
+#include <sstream>
+#include <algorithm>
+#include <cctype>
+#include <stdexcept>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
+namespace Bridge {
+
+static std::string WideToNarrow(const wchar_t* w) {
+    if (!w) return {};
+#ifdef _WIN32
+    int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return {};
+    std::string s(static_cast<size_t>(len - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), len, nullptr, nullptr);
+    return s;
+#else
+    // Fallback for non-Windows compilation (tests on Linux)
+    std::string s;
+    while (*w) { s += static_cast<char>(*w++); }
+    return s;
+#endif
+}
+
+static std::string Trim(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return {};
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+int ParsePayload(const std::string& payload, OrderRequest& out) noexcept {
+    try {
+        // Split on '|'
+        std::istringstream ss(payload);
+        std::string token;
+        while (std::getline(ss, token, '|')) {
+            token = Trim(token);
+            if (token.empty()) continue;
+            size_t eq = token.find('=');
+            if (eq == std::string::npos) continue;
+            std::string key = Trim(token.substr(0, eq));
+            std::string val = Trim(token.substr(eq + 1));
+
+            // Case-insensitive key match
+            std::string ku = key;
+            std::transform(ku.begin(), ku.end(), ku.begin(),
+                [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+
+            if      (ku == "COMMAND")     out.command     = ParseCommand(val);
+            else if (ku == "ACCOUNT")     out.account     = val;
+            else if (ku == "INSTRUMENT")  out.instrument  = val;
+            else if (ku == "ACTION")      out.action      = ParseAction(val);
+            else if (ku == "QUANTITY")    {
+                if (val.empty()) return RC_INVALID_PARAM;
+                out.quantity = std::stoi(val);
+            }
+            else if (ku == "ORDERTYPE")   out.orderType   = ParseOrderType(val);
+            else if (ku == "LIMITPRICE")  {
+                if (val.empty()) return RC_INVALID_PARAM;
+                out.limitPrice = std::stod(val);
+            }
+            else if (ku == "STOPPRICE")   {
+                if (val.empty()) return RC_INVALID_PARAM;
+                out.stopPrice = std::stod(val);
+            }
+            else if (ku == "TIMEINFORCE") out.timeInForce = ParseTimeInForce(val);
+        }
+        return ValidateRequest(out);
+    }
+    catch (...) {
+        return RC_INVALID_PARAM;
+    }
+}
+
+int BuildRequest(const wchar_t* command,
+                 const wchar_t* account,
+                 const wchar_t* instrument,
+                 const wchar_t* action,
+                 int            quantity,
+                 const wchar_t* orderType,
+                 double         limitPrice,
+                 double         stopPrice,
+                 const wchar_t* timeInForce,
+                 OrderRequest&  out) noexcept {
+    try {
+        out.command     = ParseCommand(WideToNarrow(command));
+        out.account     = WideToNarrow(account);
+        out.instrument  = WideToNarrow(instrument);
+        out.action      = ParseAction(WideToNarrow(action));
+        out.quantity    = quantity;
+        out.orderType   = ParseOrderType(WideToNarrow(orderType));
+        out.limitPrice  = limitPrice;
+        out.stopPrice   = stopPrice;
+        out.timeInForce = ParseTimeInForce(WideToNarrow(timeInForce));
+        return ValidateRequest(out);
+    }
+    catch (...) {
+        return RC_INVALID_PARAM;
+    }
+}
+
+int BuildRequest(const char* command,
+                 const char* account,
+                 const char* instrument,
+                 const char* action,
+                 int         quantity,
+                 const char* orderType,
+                 double      limitPrice,
+                 double      stopPrice,
+                 const char* timeInForce,
+                 OrderRequest& out) noexcept {
+    try {
+        out.command     = ParseCommand(command     ? command     : "");
+        out.account     = account     ? account     : "";
+        out.instrument  = instrument  ? instrument  : "";
+        out.action      = ParseAction(action       ? action      : "");
+        out.quantity    = quantity;
+        out.orderType   = ParseOrderType(orderType ? orderType   : "");
+        out.limitPrice  = limitPrice;
+        out.stopPrice   = stopPrice;
+        out.timeInForce = ParseTimeInForce(timeInForce ? timeInForce : "");
+        return ValidateRequest(out);
+    }
+    catch (...) {
+        return RC_INVALID_PARAM;
+    }
+}
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/include/Validation.h
+================================================================================
+#pragma once
+#include "Types.h"
+#include <string>
+
+namespace Bridge {
+
+// Parse a single uppercase token into the corresponding Command enum.
+Command    ParseCommand    (const std::string& s) noexcept;
+Action     ParseAction     (const std::string& s) noexcept;
+OrderType  ParseOrderType  (const std::string& s) noexcept;
+TimeInForce ParseTimeInForce(const std::string& s) noexcept;
+
+// Validate a fully-populated OrderRequest.
+// Returns RC_SUCCESS (0) or a negative error code.
+int ValidateRequest(const OrderRequest& req) noexcept;
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/src/Validation.cpp
+================================================================================
+#include "Validation.h"
+#include "Types.h"
+#include <algorithm>
+#include <cctype>
+#include <string>
+
+namespace Bridge {
+
+static std::string ToUpper(const std::string& s) {
+    std::string r = s;
+    std::transform(r.begin(), r.end(), r.begin(),
+        [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+    return r;
+}
+
+Command ParseCommand(const std::string& s) noexcept {
+    std::string u = ToUpper(s);
+    if (u == "PLACE")            return Command::PLACE;
+    if (u == "CANCEL")           return Command::CANCEL;
+    if (u == "CANCELALLORDERS")  return Command::CANCELALLORDERS;
+    if (u == "CHANGE")           return Command::CHANGE;
+    if (u == "CLOSEPOSITION")    return Command::CLOSEPOSITION;
+    if (u == "CLOSESTRATEGY")    return Command::CLOSESTRATEGY;
+    if (u == "FLATTENEVERYTHING")return Command::FLATTENEVERYTHING;
+    if (u == "REVERSEPOSITION")  return Command::REVERSEPOSITION;
+    return Command::UNKNOWN;
+}
+
+Action ParseAction(const std::string& s) noexcept {
+    std::string u = ToUpper(s);
+    if (u == "BUY")  return Action::BUY;
+    if (u == "SELL") return Action::SELL;
+    return Action::UNKNOWN;
+}
+
+OrderType ParseOrderType(const std::string& s) noexcept {
+    std::string u = ToUpper(s);
+    if (u == "MARKET")     return OrderType::MARKET;
+    if (u == "LIMIT")      return OrderType::LIMIT;
+    if (u == "STOPMARKET") return OrderType::STOPMARKET;
+    if (u == "STOPLIMIT")  return OrderType::STOPLIMIT;
+    return OrderType::UNKNOWN;
+}
+
+TimeInForce ParseTimeInForce(const std::string& s) noexcept {
+    std::string u = ToUpper(s);
+    if (u == "DAY") return TimeInForce::DAY;
+    if (u == "GTC") return TimeInForce::GTC;
+    return TimeInForce::UNKNOWN;
+}
+
+int ValidateRequest(const OrderRequest& req) noexcept {
+    if (req.command == Command::UNKNOWN)
+        return RC_INVALID_CMD;
+
+    // Commands that need account + instrument
+    bool needsInstrument = (req.command == Command::PLACE      ||
+                            req.command == Command::CANCEL     ||
+                            req.command == Command::CHANGE     ||
+                            req.command == Command::CLOSEPOSITION ||
+                            req.command == Command::CLOSESTRATEGY ||
+                            req.command == Command::REVERSEPOSITION);
+
+    if (needsInstrument) {
+        if (req.account.empty() || req.instrument.empty())
+            return RC_INVALID_PARAM;
+    }
+
+    if (req.command == Command::PLACE || req.command == Command::CHANGE) {
+        if (req.action    == Action::UNKNOWN)    return RC_INVALID_PARAM;
+        if (req.quantity  <= 0)                  return RC_INVALID_PARAM;
+        if (req.orderType == OrderType::UNKNOWN) return RC_INVALID_PARAM;
+        if (req.timeInForce == TimeInForce::UNKNOWN) return RC_INVALID_PARAM;
+
+        if (req.orderType == OrderType::LIMIT || req.orderType == OrderType::STOPLIMIT) {
+            if (req.limitPrice <= 0.0)
+                return RC_INVALID_PARAM;
+        }
+        if (req.orderType == OrderType::STOPMARKET || req.orderType == OrderType::STOPLIMIT) {
+            if (req.stopPrice <= 0.0)
+                return RC_INVALID_PARAM;
+        }
+    }
+
+    return RC_SUCCESS;
+}
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/include/Logger.h
+================================================================================
+#pragma once
+#include <string>
+
+namespace Bridge {
+
+enum class LogLevel { DEBUG_, INFO, WARNING_, ERROR_ };
+
+void LogInit(const std::string& filePath, bool logToConsole = false) noexcept;
+void Log(LogLevel level, const std::string& message) noexcept;
+
+inline void LogInfo   (const std::string& msg) noexcept { Log(LogLevel::INFO,     msg); }
+inline void LogWarning(const std::string& msg) noexcept { Log(LogLevel::WARNING_, msg); }
+inline void LogError  (const std::string& msg) noexcept { Log(LogLevel::ERROR_,   msg); }
+inline void LogDebug  (const std::string& msg) noexcept { Log(LogLevel::DEBUG_,   msg); }
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/src/Logger.cpp
+================================================================================
+#include "Logger.h"
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <chrono>
+#include <ctime>
+#include <filesystem>
+
+namespace Bridge {
+
+static std::mutex    g_logMutex;
+static std::ofstream g_logFile;
+static bool          g_logToConsole = false;
+
+static std::string CurrentTimestamp() noexcept {
+    try {
+        auto now  = std::chrono::system_clock::now();
+        std::time_t t = std::chrono::system_clock::to_time_t(now);
+        char buf[32] = {};
+#ifdef _WIN32
+        struct tm tm_info;
+        localtime_s(&tm_info, &t);
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_info);
+#else
+        struct tm* tm_info = std::localtime(&t);
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_info);
+#endif
+        return buf;
+    }
+    catch (...) { return "0000-00-00 00:00:00"; }
+}
+
+static const char* LevelStr(LogLevel level) noexcept {
+    switch (level) {
+        case LogLevel::DEBUG_:   return "DEBUG";
+        case LogLevel::INFO:     return "INFO ";
+        case LogLevel::WARNING_: return "WARN ";
+        case LogLevel::ERROR_:   return "ERROR";
+        default:                 return "?????";
+    }
+}
+
+void LogInit(const std::string& filePath, bool logToConsole) noexcept {
+    try {
+        std::lock_guard<std::mutex> lk(g_logMutex);
+        g_logToConsole = logToConsole;
+        if (!filePath.empty()) {
+            // Create parent directories if needed
+            std::filesystem::path p(filePath);
+            if (p.has_parent_path())
+                std::filesystem::create_directories(p.parent_path());
+            g_logFile.open(filePath, std::ios::app);
+        }
+    }
+    catch (...) {}
+}
+
+void Log(LogLevel level, const std::string& message) noexcept {
+    try {
+        std::string line = "[" + CurrentTimestamp() + "] [" +
+                           LevelStr(level) + "] " + message + "\n";
+        std::lock_guard<std::mutex> lk(g_logMutex);
+        if (g_logFile.is_open())
+            g_logFile << line << std::flush;
+        if (g_logToConsole)
+            std::cout << line << std::flush;
+    }
+    catch (...) {}
+}
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/include/BridgeEngine.h
+================================================================================
+#pragma once
+#include "IBrokerAdapter.h"
+#include "Config.h"
+#include "Types.h"
+#include <memory>
+
+namespace Bridge {
+
+class BridgeEngine {
+public:
+    explicit BridgeEngine(const BridgeConfig& cfg);
+    ~BridgeEngine() = default;
+
+    // Execute a fully-populated request.
+    int Execute(const OrderRequest& req) noexcept;
+
+    bool IsConnected() const noexcept;
+
+private:
+    std::shared_ptr<IBrokerAdapter> m_adapter;
+    BridgeConfig                    m_config;
+};
+
+// Singleton accessor; initialised once on first call.
+BridgeEngine& GetEngine() noexcept;
+
+} // namespace Bridge
+
+
+================================================================================
+FILE: BridgeCore/src/BridgeEngine.cpp
+================================================================================
+#include "BridgeEngine.h"
+#include "Validation.h"
+#include "Logger.h"
+#include "Config.h"
+#include "MockAdapter.h"
+#include "FixAdapterStub.h"
+#include "DotNetAdapterStub.h"
+#include <stdexcept>
+#include <filesystem>
+
+namespace Bridge {
+
+BridgeEngine::BridgeEngine(const BridgeConfig& cfg)
+    : m_config(cfg)
+{
+    LogInit(cfg.logFilePath, cfg.logToConsole);
+    LogInfo("BridgeEngine initialising with adapter=" + cfg.adapterType);
+
+    if (cfg.adapterType == "FIX") {
+        m_adapter = std::make_shared<FixAdapterStub>();
+    } else if (cfg.adapterType == "DOTNET") {
+        m_adapter = std::make_shared<DotNetAdapterStub>();
+    } else {
+        // Default: MOCK
+        m_adapter = std::make_shared<MockAdapter>();
+    }
+}
+
+int BridgeEngine::Execute(const OrderRequest& req) noexcept {
+    try {
+        if (!m_adapter || !m_adapter->IsConnected()) {
+            LogError("Adapter not connected");
+            return RC_NOT_CONNECTED;
+        }
+        int rc = m_adapter->Execute(req);
+        if (rc == RC_SUCCESS)
+            LogInfo("Execute succeeded: command=" + std::to_string(static_cast<int>(req.command)));
+        else
+            LogWarning("Execute returned code=" + std::to_string(rc));
+        return rc;
+    }
+    catch (const std::exception& ex) {
+        LogError(std::string("Exception in Execute: ") + ex.what());
+        return RC_INTERNAL_ERR;
+    }
+    catch (...) {
+        LogError("Unknown exception in Execute");
+        return RC_INTERNAL_ERR;
+    }
+}
+
+bool BridgeEngine::IsConnected() const noexcept {
+    return m_adapter && m_adapter->IsConnected();
+}
+
+BridgeEngine& GetEngine() noexcept {
+    // Load config once from file (or use defaults)
+    static BridgeConfig cfg = []() -> BridgeConfig {
+        BridgeConfig c;
+        int rc = LoadConfig("config/bridge.json", c);
+        if (rc != RC_SUCCESS)
+            c = DefaultConfig();
+        return c;
+    }();
+    static BridgeEngine engine(cfg);
+    return engine;
+}
+
+} // namespace Bridge
+
+
+================================================================================
+END OF SNAPSHOT
+================================================================================
