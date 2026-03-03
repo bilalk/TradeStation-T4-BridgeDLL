@@ -1,0 +1,49 @@
+name: fred-verification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-verify:
+    runs-on: windows-2022
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build solution (Release | x64)
+        shell: pwsh
+        run: .\scripts\build-windows.ps1 -Configuration Release -Platform x64
+
+      - name: Run BridgeTSTests (mock mode — no T4 required)
+        shell: pwsh
+        run: |
+          $exe = "x64\Release\BridgeTSTests.exe"
+          if (-not (Test-Path $exe)) { throw "BridgeTSTests.exe not found: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "BridgeTSTests failed with exit code $LASTEXITCODE" }
+
+      - name: Collect bridge log
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "logs") {
+            Get-ChildItem logs -Recurse | ForEach-Object { Write-Host $_.FullName }
+          } else {
+            Write-Host "No logs directory found."
+          }
+
+      - name: Upload Fred verification artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fred-verification-package
+          path: |
+            x64/Release/BridgeTS.dll
+            x64/Release/BridgeTSTests.exe
+            client_package/
+            logs/
