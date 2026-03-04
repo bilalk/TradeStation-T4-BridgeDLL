@@ -19,6 +19,10 @@ public sealed class PipeServer : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
 
+    // If a connected client sends no command within this window, close the connection
+    // so the server doesn't wait indefinitely if the client process hangs mid-session.
+    private const int ReadIdleTimeoutSeconds = 60;
+
     public PipeServer(BridgeConfig cfg, IT4Connector connector)
     {
         _cfg       = cfg;
@@ -66,7 +70,23 @@ public sealed class PipeServer : IDisposable
 
         while (!token.IsCancellationRequested && pipe.IsConnected)
         {
-            string? line = await reader.ReadLineAsync(token);
+            string? line;
+            try
+            {
+                // A new CancellationTokenSource is created per iteration because
+                // CancellationTokenSource has no public Reset() API and the timeout must be
+                // refreshed for every read.  Command frequency is negligible so the overhead
+                // is inconsequential.
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                readCts.CancelAfter(TimeSpan.FromSeconds(ReadIdleTimeoutSeconds));
+                line = await reader.ReadLineAsync(readCts.Token);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                Console.Error.WriteLine($"[PipeServer] Read idle timeout ({ReadIdleTimeoutSeconds}s); closing connection.");
+                break;
+            }
+
             if (line is null) break;  // client disconnected
 
             string response = ProcessCommand(line.Trim());
