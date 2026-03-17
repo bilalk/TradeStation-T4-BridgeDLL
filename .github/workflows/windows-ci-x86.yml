@@ -2,9 +2,9 @@ name: windows-ci-x86
 
 on:
   push:
-    branches: [ "copilot/create-tradestation-deliverable" ]
+    branches: [ "main", "copilot/fix-dll-export-name", "copilot/create-tradestation-deliverable" ]
   pull_request:
-    branches: [ "copilot/create-tradestation-deliverable", "main" ]
+    branches: [ "main", "copilot/add-x86-win32-build-configuration" ]
   workflow_dispatch:
 
 jobs:
@@ -56,6 +56,36 @@ jobs:
           Write-Host "CONFIRMED: BridgeTS.dll is a valid 32-bit (x86) DLL"
           $size = (Get-Item $dll).Length
           Write-Host "DLL size: $size bytes"
+
+      - name: Verify PLACE_ORDER export (no decoration)
+        shell: pwsh
+        run: |
+          $dll = "Win32\Release\BridgeTS.dll"
+          if (-not (Test-Path $dll)) { throw "BridgeTS.dll not found at $dll" }
+          # Locate dumpbin via vswhere (available on GitHub-hosted windows-2022 runner)
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          if (-not $vsPath) { throw "Visual Studio not found via vswhere" }
+          $dumpbin = Get-ChildItem -Path $vsPath -Recurse -Filter "dumpbin.exe" -ErrorAction SilentlyContinue |
+                     Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found under $vsPath" }
+          Write-Host "Using dumpbin: $dumpbin"
+          $exports = & "$dumpbin" /EXPORTS "$dll" 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed with exit code $LASTEXITCODE" }
+          Write-Host "=== dumpbin /EXPORTS output ==="
+          $exports | Write-Host
+          Write-Host "==============================="
+          # Must contain plain PLACE_ORDER (undecorated)
+          $hasClean = $exports | Select-String -Pattern '\bPLACE_ORDER\b' -Quiet
+          if (-not $hasClean) {
+            throw "PLACE_ORDER not found in DLL exports — name decoration may be present"
+          }
+          # Must NOT contain the stdcall-decorated form _PLACE_ORDER@44
+          $hasDecorated = $exports | Select-String -Pattern '_PLACE_ORDER@' -Quiet
+          if ($hasDecorated) {
+            throw "Decorated export _PLACE_ORDER@N found — .DEF file is not stripping the stdcall decoration"
+          }
+          Write-Host "CONFIRMED: PLACE_ORDER is exported without stdcall decoration"
 
       - name: Collect logs
         if: always()
