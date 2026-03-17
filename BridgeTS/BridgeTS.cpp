@@ -1,7 +1,7 @@
 // BridgeTS.cpp — TradeStation-facing shell for the T4 Bridge DLL.
 // Receives calls from EasyLanguage, validates parameters, logs activity,
 // and dispatches through BridgeCore (MOCK / DOTNET / FIX adapter).
-//#
+//
 // EXPORT NOTE: We do NOT define BRIDGETS_EXPORTS or use __declspec(dllexport).
 // All exports are controlled exclusively by BridgeTS.def so that the Win32
 // __stdcall decoration (_PLACE_ORDER@44) is stripped cleanly.  If dllexport
@@ -124,16 +124,17 @@ int __stdcall PLACE_ORDER(
         return Bridge::RC_INVALID_PARAM;
     }
 
-    Bridge::LogInfo(tag + " PLACE_ORDER called"
-        " command=" + std::string(command ? command : "<null>") +
-        " account=" + std::string(account ? account : "<null>") +
-        " instrument=" + std::string(instrument ? instrument : "<null>") +
-        " action=" + std::string(action ? action : "<null>") +
-        " quantity=" + std::to_string(quantity) +
-        " orderType=" + std::string(orderType ? orderType : "<null>") +
-        " limitPrice=" + std::to_string(limitPrice) +
-        " stopPrice=" + std::to_string(stopPrice) +
-        " tif=" + std::string(timeInForce ? timeInForce : "<null>");
+    std::string msg = tag + " PLACE_ORDER called";
+    msg += " command="    + std::string(command     ? command     : "<null>");
+    msg += " account="    + std::string(account     ? account     : "<null>");
+    msg += " instrument=" + std::string(instrument  ? instrument  : "<null>");
+    msg += " action="     + std::string(action      ? action      : "<null>");
+    msg += " quantity="   + std::to_string(quantity);
+    msg += " orderType="  + std::string(orderType   ? orderType   : "<null>");
+    msg += " limitPrice=" + std::to_string(limitPrice);
+    msg += " stopPrice="  + std::to_string(stopPrice);
+    msg += " tif="        + std::string(timeInForce ? timeInForce : "<null>");
+    Bridge::LogInfo(msg);
 
     Bridge::OrderRequest req;
     int rc = Bridge::BuildRequest(command, account, instrument, action,
