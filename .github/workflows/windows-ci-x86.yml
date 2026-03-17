@@ -2,9 +2,9 @@ name: windows-ci-x86
 
 on:
   push:
-    branches: [ "main", "copilot/fix-dll-export-name", "copilot/create-tradestation-deliverable" ]
+    branches: [ "main", "copilot/fix-dll-export-name", "copilot/create-tradestation-deliverable", "copilot/compile-bridgets-dll-win32" ]
   pull_request:
-    branches: [ "main", "copilot/add-x86-win32-build-configuration" ]
+    branches: [ "main", "copilot/add-x86-win32-build-configuration", "copilot/fix-dll-export-name" ]
   workflow_dispatch:
 
 jobs:

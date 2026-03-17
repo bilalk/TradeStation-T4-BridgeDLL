@@ -2,11 +2,17 @@
 
 // BridgeTS.h — TradeStation-facing DLL interface.
 //
-// NOTE: Do NOT use __declspec(dllexport) here.
-// All exports are controlled exclusively by BridgeTS.def so that
-// Win32 __stdcall name decoration (_PLACE_ORDER@44) is stripped.
-// Adding dllexport overrides the .DEF file and re-introduces the
-// mangled name, causing TradeStation EasyLanguage DefineDLLFunc to fail.
+// NOTE: Win32 builds do NOT define BRIDGETS_EXPORTS. BRIDGETS_API is empty,
+// and all Win32 exports are controlled exclusively by BridgeTS.def so that
+// the __stdcall decoration (_PLACE_ORDER@44) is stripped cleanly.
+// x64 builds define BRIDGETS_EXPORTS (via vcxproj preprocessor defs), so
+// BRIDGETS_API expands to __declspec(dllexport) on x64 (no @N issue there).
+
+#ifdef BRIDGETS_EXPORTS
+#  define BRIDGETS_API __declspec(dllexport)
+#else
+#  define BRIDGETS_API
+#endif
 
 extern "C" {
 
