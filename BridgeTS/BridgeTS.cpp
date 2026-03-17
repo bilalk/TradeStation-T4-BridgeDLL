@@ -1,13 +1,18 @@
 // BridgeTS.cpp — TradeStation-facing shell for the T4 Bridge DLL.
 // Receives calls from EasyLanguage, validates parameters, logs activity,
 // and dispatches through BridgeCore (MOCK / DOTNET / FIX adapter).
+//
+// EXPORT NOTE: Win32 builds do NOT define BRIDGETS_EXPORTS. All Win32 exports
+// are controlled exclusively by BridgeTS.def so the __stdcall decoration
+// (_PLACE_ORDER@44) is stripped cleanly. x64 builds define BRIDGETS_EXPORTS
+// via the vcxproj preprocessor definitions, so BRIDGETS_API expands to
+// __declspec(dllexport) on x64 (no decoration issue on 64-bit).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define BRIDGETS_EXPORTS
+// Do NOT define BRIDGETS_EXPORTS here — controlled per-configuration in vcxproj.
 #include "BridgeTS.h"
-
 #include "BridgeEngine.h"
 #include "Parser.h"
 #include "Logger.h"
@@ -21,7 +26,7 @@
 // ---------------------------------------------------------------------------
 namespace {
 
-static std::atomic<unsigned int> g_reqCounter{ 0 }; 
+static std::atomic<unsigned int> g_reqCounter{ 0 };
 
 // SEH wrapper — must be in its own function with NO C++ objects that need
 // unwinding (std::string etc.) to avoid MSVC error C2712.
@@ -96,6 +101,8 @@ BOOL APIENTRY DllMain(HMODULE /*hModule*/, DWORD ul_reason, LPVOID /*lpReserved*
 
 // ---------------------------------------------------------------------------
 // Exported functions
+// Win32: exported via BridgeTS.def only (no __declspec(dllexport))
+// x64:   BRIDGETS_API expands to __declspec(dllexport) via BRIDGETS_EXPORTS define
 // ---------------------------------------------------------------------------
 extern "C" {
 
@@ -120,16 +127,17 @@ BRIDGETS_API int __stdcall PLACE_ORDER(
         return Bridge::RC_INVALID_PARAM;
     }
 
-    Bridge::LogInfo(tag + " PLACE_ORDER called"
-        " command=" + std::string(command ? command : "<null>") +
-        " account=" + std::string(account ? account : "<null>") +
-        " instrument=" + std::string(instrument ? instrument : "<null>") +
-        " action=" + std::string(action ? action : "<null>") +
-        " quantity=" + std::to_string(quantity) +
-        " orderType=" + std::string(orderType ? orderType : "<null>") +
-        " limitPrice=" + std::to_string(limitPrice) +
-        " stopPrice=" + std::to_string(stopPrice) +
-        " tif=" + std::string(timeInForce ? timeInForce : "<null>"));
+    std::string logMsg = tag + " PLACE_ORDER called";
+    logMsg += " command=" + std::string(command ? command : "<null>");
+    logMsg += " account=" + std::string(account ? account : "<null>");
+    logMsg += " instrument=" + std::string(instrument ? instrument : "<null>");
+    logMsg += " action=" + std::string(action ? action : "<null>");
+    logMsg += " quantity=" + std::to_string(quantity);
+    logMsg += " orderType=" + std::string(orderType ? orderType : "<null>");
+    logMsg += " limitPrice=" + std::to_string(limitPrice);
+    logMsg += " stopPrice=" + std::to_string(stopPrice);
+    logMsg += " tif=" + std::string(timeInForce ? timeInForce : "<null>");
+    Bridge::LogInfo(logMsg);
 
     Bridge::OrderRequest req;
     int rc = Bridge::BuildRequest(command, account, instrument, action,
