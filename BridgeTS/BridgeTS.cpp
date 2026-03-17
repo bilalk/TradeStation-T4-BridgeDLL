@@ -2,15 +2,16 @@
 // Receives calls from EasyLanguage, validates parameters, logs activity,
 // and dispatches through BridgeCore (MOCK / DOTNET / FIX adapter).
 //
-// EXPORT NOTE: We do NOT define BRIDGETS_EXPORTS or use __declspec(dllexport).
-// All exports are controlled exclusively by BridgeTS.def so that the Win32
-// __stdcall decoration (_PLACE_ORDER@44) is stripped cleanly.  If dllexport
-// is present it overrides the .DEF file and re-introduces the mangled name.
+// EXPORT NOTE: Win32 builds do NOT define BRIDGETS_EXPORTS. All Win32 exports
+// are controlled exclusively by BridgeTS.def so the __stdcall decoration
+// (_PLACE_ORDER@44) is stripped cleanly. x64 builds define BRIDGETS_EXPORTS
+// via the vcxproj preprocessor definitions, so BRIDGETS_API expands to
+// __declspec(dllexport) on x64 (no decoration issue on 64-bit).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-// Do NOT define BRIDGETS_EXPORTS — see note above.
+// Do NOT define BRIDGETS_EXPORTS here — controlled per-configuration in vcxproj.
 #include "BridgeTS.h"
 #include "BridgeEngine.h"
 #include "Parser.h"
@@ -99,12 +100,14 @@ BOOL APIENTRY DllMain(HMODULE /*hModule*/, DWORD ul_reason, LPVOID /*lpReserved*
 }
 
 // ---------------------------------------------------------------------------
-// Exported functions — exported via BridgeTS.def, NOT via __declspec(dllexport)
+// Exported functions
+// Win32: exported via BridgeTS.def only (no __declspec(dllexport))
+// x64:   BRIDGETS_API expands to __declspec(dllexport) via BRIDGETS_EXPORTS define
 // ---------------------------------------------------------------------------
 extern "C" {
 
 // Primary ANSI entry point — this is the function Fred wires up in EasyLanguage.
-int __stdcall PLACE_ORDER(
+BRIDGETS_API int __stdcall PLACE_ORDER(
     const char* command,
     const char* account,
     const char* instrument,
@@ -124,17 +127,17 @@ int __stdcall PLACE_ORDER(
         return Bridge::RC_INVALID_PARAM;
     }
 
-    std::string msg = tag + " PLACE_ORDER called";
-    msg += " command="    + std::string(command     ? command     : "<null>");
-    msg += " account="    + std::string(account     ? account     : "<null>");
-    msg += " instrument=" + std::string(instrument  ? instrument  : "<null>");
-    msg += " action="     + std::string(action      ? action      : "<null>");
-    msg += " quantity="   + std::to_string(quantity);
-    msg += " orderType="  + std::string(orderType   ? orderType   : "<null>");
-    msg += " limitPrice=" + std::to_string(limitPrice);
-    msg += " stopPrice="  + std::to_string(stopPrice);
-    msg += " tif="        + std::string(timeInForce ? timeInForce : "<null>");
-    Bridge::LogInfo(msg);
+    std::string logMsg = tag + " PLACE_ORDER called";
+    logMsg += " command=" + std::string(command ? command : "<null>");
+    logMsg += " account=" + std::string(account ? account : "<null>");
+    logMsg += " instrument=" + std::string(instrument ? instrument : "<null>");
+    logMsg += " action=" + std::string(action ? action : "<null>");
+    logMsg += " quantity=" + std::to_string(quantity);
+    logMsg += " orderType=" + std::string(orderType ? orderType : "<null>");
+    logMsg += " limitPrice=" + std::to_string(limitPrice);
+    logMsg += " stopPrice=" + std::to_string(stopPrice);
+    logMsg += " tif=" + std::string(timeInForce ? timeInForce : "<null>");
+    Bridge::LogInfo(logMsg);
 
     Bridge::OrderRequest req;
     int rc = Bridge::BuildRequest(command, account, instrument, action,
@@ -145,6 +148,82 @@ int __stdcall PLACE_ORDER(
         return rc;
     }
     Bridge::LogInfo(tag + " Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+// Unicode variant.
+BRIDGETS_API int __stdcall PLACE_ORDER_W(
+    const wchar_t* command,
+    const wchar_t* account,
+    const wchar_t* instrument,
+    const wchar_t* action,
+    int            quantity,
+    const wchar_t* orderType,
+    double         limitPrice,
+    double         stopPrice,
+    const wchar_t* timeInForce)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    Bridge::OrderRequest req;
+    int rc = Bridge::BuildRequest(command, account, instrument, action,
+                                  quantity, orderType, limitPrice, stopPrice,
+                                  timeInForce, req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " PLACE_ORDER_W validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " PLACE_ORDER_W Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+// ANSI named alias — identical to PLACE_ORDER.
+BRIDGETS_API int __stdcall PLACE_ORDER_A(
+    const char* command,
+    const char* account,
+    const char* instrument,
+    const char* action,
+    int         quantity,
+    const char* orderType,
+    double      limitPrice,
+    double      stopPrice,
+    const char* timeInForce)
+{
+    return PLACE_ORDER(command, account, instrument, action,
+                       quantity, orderType, limitPrice, stopPrice, timeInForce);
+}
+
+// Pipe-delimited Unicode payload.
+BRIDGETS_API int __stdcall PLACE_ORDER_CMD_W(const wchar_t* payload)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    std::string narrow = WideToUtf8(payload);
+    Bridge::OrderRequest req;
+    int rc = Bridge::ParsePayload(narrow, req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " PLACE_ORDER_CMD_W parse/validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " PLACE_ORDER_CMD_W Validation: OK");
+    return DispatchRequest(req, tag);
+}
+
+// Pipe-delimited ANSI payload.
+BRIDGETS_API int __stdcall PLACE_ORDER_CMD_A(const char* payload)
+{
+    unsigned int id = ++g_reqCounter;
+    std::string tag = ReqTag(id);
+
+    Bridge::OrderRequest req;
+    int rc = Bridge::ParsePayload(payload ? payload : "", req);
+    if (rc != Bridge::RC_SUCCESS) {
+        Bridge::LogWarning(tag + " PLACE_ORDER_CMD_A parse/validation failed rc=" + std::to_string(rc));
+        return rc;
+    }
+    Bridge::LogInfo(tag + " PLACE_ORDER_CMD_A Validation: OK");
     return DispatchRequest(req, tag);
 }
 
