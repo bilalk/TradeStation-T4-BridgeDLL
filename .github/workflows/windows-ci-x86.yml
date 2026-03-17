@@ -1,0 +1,81 @@
+name: windows-ci-x86
+
+on:
+  push:
+    branches: [ "copilot/create-tradestation-deliverable" ]
+  pull_request:
+    branches: [ "copilot/create-tradestation-deliverable", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test-x86:
+    runs-on: windows-2022
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build solution (Win32 Release)
+        shell: pwsh
+        run: .\scripts\build-windows.ps1 -Configuration Release -Platform Win32
+
+      - name: Run BridgeCoreTests (x86)
+        shell: pwsh
+        run: |
+          $exe = "Win32\Release\BridgeCoreTests.exe"
+          if (-not (Test-Path $exe)) { throw "Test executable not found: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "BridgeCoreTests failed with exit code $LASTEXITCODE" }
+
+      - name: Run BridgeTSTests (x86)
+        shell: pwsh
+        run: |
+          $exe = "Win32\Release\BridgeTSTests.exe"
+          if (-not (Test-Path $exe)) { throw "BridgeTSTests not found: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "BridgeTSTests failed with exit code $LASTEXITCODE" }
+
+      - name: Verify DLL is 32-bit
+        shell: pwsh
+        run: |
+          $dll = "Win32\Release\BridgeTS.dll"
+          if (-not (Test-Path $dll)) { throw "BridgeTS.dll not found at $dll" }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $dll))
+          # PE header offset is at 0x3C
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          # Machine type is at PE offset + 4
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          # 0x014C = IMAGE_FILE_MACHINE_I386 (32-bit x86)
+          # 0x8664 = IMAGE_FILE_MACHINE_AMD64 (64-bit x64)
+          Write-Host "Machine type: 0x$($machine.ToString('X4'))"
+          if ($machine -ne 0x014C) {
+            throw "DLL is NOT 32-bit! Machine type 0x$($machine.ToString('X4')) expected 0x014C (x86)"
+          }
+          Write-Host "CONFIRMED: BridgeTS.dll is a valid 32-bit (x86) DLL"
+          $size = (Get-Item $dll).Length
+          Write-Host "DLL size: $size bytes"
+
+      - name: Collect logs
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path "logs") {
+            Get-ChildItem logs -Recurse | ForEach-Object { Write-Host $_.FullName }
+          } else {
+            Write-Host "No logs directory found."
+          }
+
+      - name: Upload x86 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-release-x86
+          path: |
+            Win32/Release/BridgeTS.dll
+            Win32/Release/BridgeCoreTests.exe
+            Win32/Release/BridgeTSTests.exe
+            config/bridge.example.json
+            docs/
+            logs/

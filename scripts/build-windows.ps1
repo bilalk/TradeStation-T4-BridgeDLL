@@ -29,6 +29,13 @@ if (-not $vsPath) { throw "Visual Studio not found." }
 $devCmd = Join-Path $vsPath "Common7\Tools\VsDevCmd.bat"
 if (-not (Test-Path $devCmd)) { throw "VsDevCmd not found: $devCmd" }
 
-cmd /c "`"$devCmd`" -arch=amd64 && msbuild `"$($sln.FullName)`" /m /p:Configuration=$Configuration /p:Platform=$Platform"
+# Map MSBuild platform to VsDevCmd arch
+$arch = if ($Platform -eq "Win32") { "x86" } else { "amd64" }
+
+Write-Host "VsDevCmd arch: $arch"
+
+cmd /c "`"$devCmd`" -arch=$arch && msbuild `"$($sln.FullName)`" /m /p:Configuration=$Configuration /p:Platform=$Platform"
+
+if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
 
 Write-Host "== Build script done =="
