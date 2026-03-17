@@ -1,14 +1,13 @@
 #pragma once
 
-#ifdef BRIDGETS_EXPORTS
-#  define BRIDGETS_API __declspec(dllexport)
-#else
-#  define BRIDGETS_API __declspec(dllimport)
-#endif
+// Export control is handled entirely by BridgeTS.def.
+// Using __declspec(dllexport) on Win32 __stdcall bypasses the .DEF file
+// and produces decorated names (_FUNCTIONNAME@N) that EasyLanguage cannot resolve.
+#define BRIDGETS_API
 
 extern "C" {
 
-// ANSI entry point — primary interface for TradeStation 10 EasyLanguage.
+// ANSI entry point — primary interface for TradeStation EasyLanguage.
 // Called via:  DefineDLLFunc: "BridgeTS.dll", INT, "PLACE_ORDER",
 //              LPSTR, LPSTR, LPSTR, LPSTR, INT, LPSTR, DOUBLE, DOUBLE, LPSTR;
 BRIDGETS_API int __stdcall PLACE_ORDER(
@@ -21,35 +20,5 @@ BRIDGETS_API int __stdcall PLACE_ORDER(
     double      limitPrice,
     double      stopPrice,
     const char* timeInForce);
-
-// Unicode variant for flexibility.
-BRIDGETS_API int __stdcall PLACE_ORDER_W(
-    const wchar_t* command,
-    const wchar_t* account,
-    const wchar_t* instrument,
-    const wchar_t* action,
-    int            quantity,
-    const wchar_t* orderType,
-    double         limitPrice,
-    double         stopPrice,
-    const wchar_t* timeInForce);
-
-// ANSI named alias (matches BridgeDLL API surface).
-BRIDGETS_API int __stdcall PLACE_ORDER_A(
-    const char* command,
-    const char* account,
-    const char* instrument,
-    const char* action,
-    int         quantity,
-    const char* orderType,
-    double      limitPrice,
-    double      stopPrice,
-    const char* timeInForce);
-
-// Single pipe-delimited Unicode payload.
-BRIDGETS_API int __stdcall PLACE_ORDER_CMD_W(const wchar_t* payload);
-
-// Single pipe-delimited ANSI payload.
-BRIDGETS_API int __stdcall PLACE_ORDER_CMD_A(const char* payload);
 
 } // extern "C"
